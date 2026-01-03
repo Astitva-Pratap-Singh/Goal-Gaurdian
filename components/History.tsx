@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { 
   ResponsiveContainer, 
   BarChart, 
@@ -19,12 +19,12 @@ interface HistoryProps {
 }
 
 export const History: React.FC<HistoryProps> = ({ history }) => {
+  // Lifetime Stats Calculation (All History)
   const totalCompleted = history.reduce((acc, curr) => acc + curr.completedHours, 0);
   const avgRating = history.length > 0 
     ? (history.reduce((acc, curr) => acc + curr.rating, 0) / history.length).toFixed(1) 
     : "0.0";
   
-  // Sort history by date for charts
   const sortedHistory = [...history].sort((a, b) => a.weekId.localeCompare(b.weekId));
 
   const calculateBestStreak = (entries: HistoryEntry[]) => {
@@ -32,7 +32,6 @@ export const History: React.FC<HistoryProps> = ({ history }) => {
     let currentStreak = 0;
     
     entries.forEach(entry => {
-        // A week counts if goal is met. 
         if (entry.completedHours >= entry.goalHours) {
             currentStreak++;
             maxStreak = Math.max(maxStreak, currentStreak);
@@ -40,11 +39,40 @@ export const History: React.FC<HistoryProps> = ({ history }) => {
             currentStreak = 0;
         }
     });
-    
     return maxStreak;
   };
 
   const bestStreak = calculateBestStreak(sortedHistory);
+  const avgScreenTime = history.length > 0 
+    ? (history.reduce((acc, curr) => acc + curr.screenTimeHours, 0) / history.length).toFixed(1) 
+    : "0.0";
+
+  // Pagination Logic (Cluster of 4 weeks)
+  // We want Page 0 to be the LATEST 4 weeks.
+  const CHUNK_SIZE = 4;
+  const [page, setPage] = useState(0); 
+  
+  // Reverse to slice from newest
+  const reversedHistory = [...sortedHistory].reverse();
+  const totalPages = Math.ceil(reversedHistory.length / CHUNK_SIZE) || 1;
+
+  // Get current chunk
+  const startIndex = page * CHUNK_SIZE;
+  const currentChunkRaw = reversedHistory.slice(startIndex, startIndex + CHUNK_SIZE);
+  // Re-reverse to chronological order for charts
+  const visibleHistory = [...currentChunkRaw].reverse();
+
+  const handleOlder = () => {
+    if (page < totalPages - 1) setPage(p => p + 1);
+  };
+
+  const handleNewer = () => {
+    if (page > 0) setPage(p => p - 1);
+  };
+
+  const rangeLabel = visibleHistory.length > 0 
+    ? `${visibleHistory[0].weekId} — ${visibleHistory[visibleHistory.length - 1].weekId}`
+    : "No Data";
 
   return (
     <div className="space-y-8 pb-20 md:pb-0">
@@ -53,7 +81,7 @@ export const History: React.FC<HistoryProps> = ({ history }) => {
           <p className="text-slate-400">Track your productivity trends and screen time over weeks.</p>
        </header>
 
-       {/* Summary Cards */}
+       {/* Summary Cards (Lifetime Stats) */}
        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="bg-slate-900 p-5 rounded-xl border border-slate-800">
              <div className="flex items-center gap-3 mb-2">
@@ -93,9 +121,34 @@ export const History: React.FC<HistoryProps> = ({ history }) => {
                 <span className="text-slate-400 text-sm">Avg Screen Time</span>
              </div>
              <p className="text-2xl font-bold text-white">
-                {(history.length > 0 ? history.reduce((acc, curr) => acc + curr.screenTimeHours, 0) / history.length : 0).toFixed(1)}h
+                {avgScreenTime}h
              </p>
           </div>
+       </div>
+
+       {/* Pagination Controls */}
+       <div className="flex items-center justify-between bg-slate-900/50 p-3 rounded-lg border border-slate-800">
+          <button 
+            onClick={handleOlder}
+            disabled={page >= totalPages - 1}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${page >= totalPages - 1 ? 'text-slate-600 cursor-not-allowed' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
+          >
+             <Icons.ChevronLeft className="w-4 h-4" />
+             Older
+          </button>
+          
+          <span className="text-slate-400 text-sm font-mono bg-slate-950 px-3 py-1 rounded border border-slate-800">
+             {rangeLabel}
+          </span>
+
+          <button 
+            onClick={handleNewer}
+            disabled={page === 0}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${page === 0 ? 'text-slate-600 cursor-not-allowed' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
+          >
+             Newer
+             <Icons.ChevronRight className="w-4 h-4" />
+          </button>
        </div>
 
        {/* Charts */}
@@ -105,7 +158,7 @@ export const History: React.FC<HistoryProps> = ({ history }) => {
              <h3 className="text-lg font-semibold text-white mb-6">Weekly Goal Completion</h3>
              <div className="h-72">
                 <ResponsiveContainer width="100%" height="100%">
-                   <BarChart data={sortedHistory}>
+                   <BarChart data={visibleHistory}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
                       <XAxis dataKey="weekId" stroke="#475569" fontSize={12} tickLine={false} axisLine={false} />
                       <YAxis stroke="#475569" fontSize={12} tickLine={false} axisLine={false} />
@@ -125,7 +178,7 @@ export const History: React.FC<HistoryProps> = ({ history }) => {
              <h3 className="text-lg font-semibold text-white mb-6">Screen Time Trends</h3>
              <div className="h-72">
                 <ResponsiveContainer width="100%" height="100%">
-                   <AreaChart data={sortedHistory}>
+                   <AreaChart data={visibleHistory}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
                       <XAxis dataKey="weekId" stroke="#475569" fontSize={12} tickLine={false} axisLine={false} />
                       <YAxis stroke="#475569" fontSize={12} tickLine={false} axisLine={false} />
@@ -140,10 +193,11 @@ export const History: React.FC<HistoryProps> = ({ history }) => {
           </div>
        </div>
 
-       {/* History List */}
+       {/* History List (Paginated) */}
        <div className="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden">
-          <div className="p-6 border-b border-slate-800">
-             <h3 className="text-lg font-semibold text-white">Past Weeks</h3>
+          <div className="p-6 border-b border-slate-800 flex justify-between items-center">
+             <h3 className="text-lg font-semibold text-white">Week Details</h3>
+             <span className="text-xs text-slate-500">Showing 4 weeks per view</span>
           </div>
           <div className="overflow-x-auto">
              <table className="w-full text-left">
@@ -157,7 +211,8 @@ export const History: React.FC<HistoryProps> = ({ history }) => {
                    </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
-                   {[...sortedHistory].reverse().map((entry) => (
+                   {/* We display the current visible history slice here, reversed to show newest on top within the table */}
+                   {[...visibleHistory].reverse().map((entry) => (
                       <tr key={entry.id} className="hover:bg-slate-800/50 transition-colors">
                          <td className="px-6 py-4 text-slate-300 font-medium">{entry.weekId}</td>
                          <td className="px-6 py-4 text-slate-500 text-sm">{entry.startDate} - {entry.endDate}</td>
@@ -181,6 +236,13 @@ export const History: React.FC<HistoryProps> = ({ history }) => {
                          </td>
                       </tr>
                    ))}
+                   {visibleHistory.length === 0 && (
+                      <tr>
+                         <td colSpan={5} className="px-6 py-8 text-center text-slate-500">
+                            No history data available for this period.
+                         </td>
+                      </tr>
+                   )}
                 </tbody>
              </table>
           </div>

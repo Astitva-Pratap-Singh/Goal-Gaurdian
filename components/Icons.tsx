@@ -6,14 +6,16 @@ import {
   Upload, 
   BarChart2, 
   Layout, 
-  ShieldCheck,
-  Flame,
-  LogOut,
-  Target,
-  Smartphone,
-  Plus,
-  Trash2,
-  Pencil
+  ShieldCheck, 
+  Flame, 
+  LogOut, 
+  Target, 
+  Smartphone, 
+  Plus, 
+  Trash2, 
+  Pencil,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 
 export const Icons = {
@@ -30,5 +32,7 @@ export const Icons = {
   Smartphone,
   Plus,
   Trash: Trash2,
-  Edit: Pencil
+  Edit: Pencil,
+  ChevronLeft,
+  ChevronRight
 };
