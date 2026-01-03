@@ -3,6 +3,7 @@ import { Icons } from './Icons';
 import { Task, TaskType, VerificationStatus, UserProfile } from '../types';
 import { verifyTaskProof } from '../services/geminiService';
 import { supabase } from '../services/supabase';
+import { uploadToR2 } from '../services/storage';
 
 interface TaskListProps {
   tasks: Task[];
@@ -91,34 +92,44 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
     const file = e.target.files?.[0];
     if (!file || !selectedTaskForUpload) return;
 
-    // Convert to Base64
+    const taskIndex = tasks.findIndex(t => t.id === selectedTaskForUpload);
+    if (taskIndex === -1) return;
+    const taskToVerify = tasks[taskIndex];
+
+    // Optimistic update to VERIFYING
+    setVerifyingId(selectedTaskForUpload);
+    updateTaskStatus(selectedTaskForUpload, VerificationStatus.VERIFYING);
+
+    // 1. Read as Base64 for AI Verification
     const reader = new FileReader();
     reader.onloadend = async () => {
       const base64String = reader.result as string;
-      const taskIndex = tasks.findIndex(t => t.id === selectedTaskForUpload);
-      if (taskIndex === -1) return;
-
-      const taskToVerify = tasks[taskIndex];
-
-      // Optimistic update to VERIFYING
-      setVerifyingId(selectedTaskForUpload);
-      updateTaskStatus(selectedTaskForUpload, VerificationStatus.VERIFYING);
-
+      
       // Call AI Service
       const result = await verifyTaskProof(taskToVerify, base64String, file.type);
       
-      setVerifyingId(null);
       let newStatus = VerificationStatus.PENDING;
       let rejectionReason = "";
+      let publicUrl = "";
 
       if (result.verified) {
-         newStatus = VerificationStatus.VERIFIED;
-         setTasks(prev => prev.map(t => 
-             t.id === selectedTaskForUpload 
-             ? { ...t, status: newStatus, completedAt: Date.now(), proofImage: base64String } 
-             : t
-         ));
-         updateCompletedHours(taskToVerify.durationHours);
+         try {
+           // 2. Upload to Cloudflare R2 (Optimized)
+           publicUrl = await uploadToR2(file, user.googleId, 'tasks');
+           newStatus = VerificationStatus.VERIFIED;
+           
+           setTasks(prev => prev.map(t => 
+               t.id === selectedTaskForUpload 
+               ? { ...t, status: newStatus, completedAt: Date.now(), proofImage: publicUrl } 
+               : t
+           ));
+           updateCompletedHours(taskToVerify.durationHours);
+         } catch (uploadErr) {
+           console.error("Upload failed", uploadErr);
+           alert("Verification successful, but upload failed. Check R2 configuration.");
+           // Fallback to verified without image URL if strict persistence isn't required for 'verified' state
+           newStatus = VerificationStatus.VERIFIED; 
+         }
       } else {
          newStatus = VerificationStatus.REJECTED;
          rejectionReason = result.reason || "Verification failed";
@@ -130,11 +141,13 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
          alert(`Verification Failed: ${rejectionReason}`);
       }
       
+      setVerifyingId(null);
+      
       // Update DB
       await supabase.from('tasks').update({
         status: newStatus,
         completed_at: result.verified ? Date.now() : null,
-        proof_image: base64String, // Note: Optimally, this should be a Storage URL
+        proof_image: publicUrl || null,
         rejection_reason: rejectionReason
       }).eq('id', selectedTaskForUpload);
 
@@ -194,6 +207,13 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
               </div>
               <h3 className="text-lg font-semibold text-slate-100">{task.title}</h3>
               <p className="text-slate-400 text-sm mt-1">{task.description}</p>
+              
+              {/* Show proof link if verified and URL exists */}
+              {task.status === VerificationStatus.VERIFIED && task.proofImage && (
+                  <a href={task.proofImage} target="_blank" rel="noopener noreferrer" className="text-xs text-indigo-400 hover:underline mt-2 inline-block">
+                    View Verified Proof
+                  </a>
+              )}
             </div>
 
             <div className="w-full md:w-auto flex justify-end">
@@ -226,7 +246,7 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
         type="file" 
         ref={fileInputRef} 
         onChange={handleFileUpload} 
-        accept="image/*" 
+        accept="image/*,application/pdf"
         className="hidden" 
       />
 

@@ -310,7 +310,7 @@ const App: React.FC = () => {
         <div className="max-w-7xl mx-auto h-full">
           {currentView === 'dashboard' && <Dashboard user={user} stats={stats} tasks={tasks} />}
           {currentView === 'tasks' && <TaskList tasks={tasks} setTasks={setTasks} user={user} updateCompletedHours={updateCompletedHours} />}
-          {currentView === 'screentime' && <ScreenTimeUpload onSubmit={handleScreenTimeSubmit} />}
+          {currentView === 'screentime' && <ScreenTimeUpload user={user} onSubmit={handleScreenTimeSubmit} />}
           {currentView === 'history' && <History history={[...history, { ...stats, id: 'current' } as HistoryEntry]} />}
         </div>
       </main>

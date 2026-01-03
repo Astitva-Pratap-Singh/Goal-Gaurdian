@@ -1,32 +1,49 @@
 import React, { useState } from 'react';
 import { Icons } from './Icons';
-import { VerificationStatus } from '../types';
+import { UserProfile } from '../types';
+import { uploadToR2 } from '../services/storage';
 
 interface ScreenTimeUploadProps {
-  onSubmit: (hours: number, image: string) => void;
+  user: UserProfile;
+  onSubmit: (hours: number, imageUrl: string) => void;
 }
 
-export const ScreenTimeUpload: React.FC<ScreenTimeUploadProps> = ({ onSubmit }) => {
+export const ScreenTimeUpload: React.FC<ScreenTimeUploadProps> = ({ user, onSubmit }) => {
   const [hours, setHours] = useState<number>(0);
-  const [image, setImage] = useState<string | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
+    const selectedFile = e.target.files?.[0];
+    if (selectedFile) {
+      setFile(selectedFile);
       const reader = new FileReader();
       reader.onloadend = () => {
-        setImage(reader.result as string);
+        setImagePreview(reader.result as string);
       };
-      reader.readAsDataURL(file);
+      reader.readAsDataURL(selectedFile);
     }
   };
 
-  const handleSubmit = () => {
-    if (hours >= 0 && image) {
-      onSubmit(hours, image);
-      setHours(0);
-      setImage(null);
-      alert("Screen time logged successfully.");
+  const handleSubmit = async () => {
+    if (hours >= 0 && file && user) {
+      try {
+        setIsUploading(true);
+        // Upload to R2 (Optimized)
+        const url = await uploadToR2(file, user.googleId, 'screentime');
+        
+        onSubmit(hours, url);
+        setHours(0);
+        setImagePreview(null);
+        setFile(null);
+        alert("Screen time logged successfully.");
+      } catch (error) {
+        console.error(error);
+        alert("Failed to upload image. Please check credentials.");
+      } finally {
+        setIsUploading(false);
+      }
     }
   };
 
@@ -60,11 +77,11 @@ export const ScreenTimeUpload: React.FC<ScreenTimeUploadProps> = ({ onSubmit }) 
           </div>
 
           <div className="border-2 border-dashed border-slate-700 rounded-xl p-6 text-center hover:bg-slate-800/50 transition-colors">
-             {image ? (
+             {imagePreview ? (
                <div className="relative">
-                 <img src={image} alt="Preview" className="max-h-48 mx-auto rounded-lg" />
+                 <img src={imagePreview} alt="Preview" className="max-h-48 mx-auto rounded-lg" />
                  <button 
-                   onClick={() => setImage(null)}
+                   onClick={() => { setImagePreview(null); setFile(null); }}
                    className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600"
                  >
                    <Icons.XCircle className="w-4 h-4" />
@@ -81,14 +98,14 @@ export const ScreenTimeUpload: React.FC<ScreenTimeUploadProps> = ({ onSubmit }) 
 
           <button 
             onClick={handleSubmit}
-            disabled={!image || hours === 0}
+            disabled={!file || hours === 0 || isUploading}
             className={`w-full py-4 rounded-xl font-bold text-lg transition-all ${
-              image && hours > 0 
+              file && hours > 0 && !isUploading
               ? 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-900/30' 
               : 'bg-slate-800 text-slate-500 cursor-not-allowed'
             }`}
           >
-            Submit Report
+            {isUploading ? 'Uploading & Optimizing...' : 'Submit Report'}
           </button>
         </div>
       </div>
