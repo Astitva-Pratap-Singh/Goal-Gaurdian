@@ -1,0 +1,8 @@
+{
+  "name": "FocusForge",
+  "description": "An AI-verified productivity tracker that enforces weekly goals, limits daily task load, and calculates productivity ratings based on proof of work and screen time.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
