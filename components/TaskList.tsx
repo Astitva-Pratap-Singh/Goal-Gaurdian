@@ -137,7 +137,7 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
   };
 
   const handleDeleteTask = async (taskId: string) => {
-    if (!window.confirm("Are you sure you want to remove this task?")) {
+    if (!window.confirm("Are you sure you want to remove this completed task? This cannot be undone.")) {
       return;
     }
 
@@ -314,18 +314,10 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
                     <span>AI Verifying...</span>
                  </div>
                ) : (
-                 <div className="flex gap-2 w-full md:w-auto">
-                    {/* Allow deleting pending tasks too, usually good UX */}
-                    <button 
-                      onClick={() => handleDeleteTask(task.id)}
-                      className="p-2 text-slate-500 hover:text-red-400 hover:bg-red-950/30 rounded-lg transition-colors border border-slate-700 hover:border-red-900/50"
-                      title="Delete Task"
-                    >
-                      <Icons.Trash className="w-4 h-4" />
-                    </button>
+                 <div className="w-full md:w-auto">
                     <button 
                         onClick={() => triggerUpload(task.id)}
-                        className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded-lg border border-slate-700 transition-colors"
+                        className="w-full md:w-auto flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded-lg border border-slate-700 transition-colors"
                     >
                         <Icons.Upload className="w-4 h-4" />
                         Submit Proof
