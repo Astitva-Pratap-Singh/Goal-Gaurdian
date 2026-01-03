@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area, XAxis, YAxis, Tooltip, BarChart, Bar, CartesianGrid } from 'recharts';
+import { ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area, XAxis, YAxis, Tooltip, BarChart, Bar, CartesianGrid, Legend } from 'recharts';
 import { Icons } from './Icons';
 import { UserProfile, WeeklyStats, Task, TaskType } from '../types';
 
@@ -12,45 +12,61 @@ interface DashboardProps {
 export const Dashboard: React.FC<DashboardProps> = ({ user, stats, tasks }) => {
   
   const completionPercentage = Math.min(100, (stats.completedHours / stats.goalHours) * 100);
-  
+
+  // Determine Current Week Range (Monday to Sunday)
+  const { monday, nextMonday } = useMemo(() => {
+    const now = new Date();
+    const currentDay = now.getDay(); // 0=Sun, 1=Mon...
+    const distanceToMonday = currentDay === 0 ? 6 : currentDay - 1;
+    
+    const m = new Date(now);
+    m.setDate(now.getDate() - distanceToMonday);
+    m.setHours(0, 0, 0, 0);
+    
+    const nm = new Date(m);
+    nm.setDate(m.getDate() + 7);
+    
+    return { monday: m, nextMonday: nm };
+  }, []);
+
+  // Filter verified tasks for this week only
+  const thisWeekTasks = useMemo(() => {
+    return tasks.filter(task => {
+        if (task.status !== 'VERIFIED' || !task.completedAt) return false;
+        const tDate = new Date(task.completedAt);
+        return tDate >= monday && tDate < nextMonday;
+    });
+  }, [tasks, monday, nextMonday]);
+
+  // Calculate Focus Areas (Study vs Work) for THIS WEEK
   const tasksByType = useMemo(() => {
-    const study = tasks.filter(t => t.type === TaskType.STUDY && t.status === 'VERIFIED').reduce((acc, t) => acc + t.durationHours, 0);
-    const work = tasks.filter(t => t.type === TaskType.WORK && t.status === 'VERIFIED').reduce((acc, t) => acc + t.durationHours, 0);
+    const study = thisWeekTasks.filter(t => t.type === TaskType.STUDY).reduce((acc, t) => acc + t.durationHours, 0);
+    const work = thisWeekTasks.filter(t => t.type === TaskType.WORK).reduce((acc, t) => acc + t.durationHours, 0);
     return [
       { name: 'Study', value: study, color: '#818cf8' }, // Indigo 400
       { name: 'Work', value: work, color: '#2dd4bf' }, // Teal 400
     ];
-  }, [tasks]);
+  }, [thisWeekTasks]);
 
+  const weeklyStudyHours = tasksByType.find(t => t.name === 'Study')?.value || 0;
+  const weeklyWorkHours = tasksByType.find(t => t.name === 'Work')?.value || 0;
+  const totalProductivity = weeklyStudyHours + weeklyWorkHours;
+
+  // Calculate Daily Activity for THIS WEEK
   const weeklyActivity = useMemo(() => {
     const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    const now = new Date();
-    // Get start of current week (Monday)
-    const currentDay = now.getDay(); // 0=Sun, 1=Mon
-    const distanceToMonday = currentDay === 0 ? 6 : currentDay - 1;
-    
-    const monday = new Date(now);
-    monday.setDate(now.getDate() - distanceToMonday);
-    monday.setHours(0, 0, 0, 0);
-    const nextMonday = new Date(monday);
-    nextMonday.setDate(monday.getDate() + 7);
-
     const data = days.map(d => ({ day: d, hours: 0 }));
 
-    tasks.forEach(task => {
-        if (task.status === 'VERIFIED' && task.completedAt) {
-            const tDate = new Date(task.completedAt);
-            if (tDate >= monday && tDate < nextMonday) {
-                const diffTime = tDate.getTime() - monday.getTime();
-                const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-                if (diffDays >= 0 && diffDays < 7) {
-                    data[diffDays].hours += task.durationHours;
-                }
-            }
+    thisWeekTasks.forEach(task => {
+        const tDate = new Date(task.completedAt!);
+        const diffTime = tDate.getTime() - monday.getTime();
+        const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+        if (diffDays >= 0 && diffDays < 7) {
+            data[diffDays].hours += task.durationHours;
         }
     });
     return data;
-  }, [tasks]);
+  }, [thisWeekTasks, monday]);
 
   const ratingColor = stats.rating >= 7 ? 'text-green-400' : stats.rating >= 4 ? 'text-yellow-400' : 'text-red-400';
 
@@ -59,7 +75,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, stats, tasks }) => {
       <header className="flex justify-between items-end mb-8">
         <div>
           <h2 className="text-3xl font-bold text-white mb-1">Dashboard</h2>
-          <p className="text-slate-400">Week Overview • {new Date().toLocaleDateString()}</p>
+          <p className="text-slate-400">Week Overview • {monday.toLocaleDateString()} - {new Date(nextMonday.getTime() - 1).toLocaleDateString()}</p>
         </div>
         <div className="flex items-center gap-2 bg-orange-950/30 px-4 py-2 rounded-full border border-orange-900/50">
           <Icons.Fire className="w-5 h-5 text-orange-500 animate-pulse" />
@@ -124,9 +140,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, stats, tasks }) => {
           <p className="text-xs text-slate-500 mt-2">Submit daily by 11 PM</p>
         </div>
 
-        {/* Task Breakdown */}
+        {/* Task Breakdown (This Week) */}
         <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800">
-          <p className="text-slate-400 text-sm font-medium mb-4">Focus Areas</p>
+          <p className="text-slate-400 text-sm font-medium mb-4">Focus Areas (This Week)</p>
           <div className="space-y-3">
              {tasksByType.map((item) => (
                <div key={item.name}>
@@ -137,11 +153,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, stats, tasks }) => {
                  <div className="w-full bg-slate-800 rounded-full h-1.5">
                    <div 
                     className="h-1.5 rounded-full" 
-                    style={{ width: `${Math.min(100, (item.value / (stats.completedHours || 1)) * 100)}%`, backgroundColor: item.color }} 
+                    style={{ width: `${Math.min(100, (item.value / (totalProductivity || 1)) * 100)}%`, backgroundColor: item.color }} 
                    />
                  </div>
                </div>
              ))}
+             {totalProductivity === 0 && <p className="text-xs text-slate-500 italic">No verified tasks this week</p>}
           </div>
         </div>
       </div>
@@ -178,7 +195,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, stats, tasks }) => {
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={[
-                  { name: 'This Week', prod: stats.completedHours, screen: stats.screenTimeHours }
+                  { 
+                    name: 'This Week', 
+                    study: weeklyStudyHours, 
+                    work: weeklyWorkHours, 
+                    screen: stats.screenTimeHours 
+                  }
                 ]}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
                   <XAxis dataKey="name" stroke="#475569" fontSize={12} tickLine={false} axisLine={false} />
@@ -186,10 +208,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, stats, tasks }) => {
                   <Tooltip 
                     cursor={{fill: '#1e293b'}} 
                     contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc' }} 
-                    formatter={(value: number) => [`${value.toFixed(1)} hrs`]}
+                    formatter={(value: number, name: string) => [`${value.toFixed(1)} hrs`, name === 'study' ? 'Study' : name === 'work' ? 'Work' : 'Screen Time']}
                   />
-                  <Bar dataKey="prod" name="Work" fill="#2dd4bf" radius={[4, 4, 0, 0]} barSize={40} />
-                  <Bar dataKey="screen" name="Screen" fill="#f43f5e" radius={[4, 4, 0, 0]} barSize={40} />
+                  <Legend />
+                  <Bar dataKey="study" name="Study" stackId="a" fill="#818cf8" radius={[0, 0, 0, 0]} barSize={40} />
+                  <Bar dataKey="work" name="Work" stackId="a" fill="#2dd4bf" radius={[4, 4, 0, 0]} barSize={40} />
+                  <Bar dataKey="screen" name="Screen Time" fill="#f43f5e" radius={[4, 4, 0, 0]} barSize={40} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
