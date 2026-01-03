@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { Icons } from './Icons';
 import { Task, TaskType, VerificationStatus, UserProfile } from '../types';
 import { verifyTaskProof } from '../services/geminiService';
+import { supabase } from '../services/supabase';
 
 interface TaskListProps {
   tasks: Task[];
@@ -32,16 +33,17 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
   });
   const todayUsed = todayTasks.reduce((acc, t) => acc + t.durationHours, 0);
 
-  const handleAddTask = () => {
+  const handleAddTask = async () => {
     if (!newTaskTitle || newTaskDuration <= 0) return;
 
     if (todayUsed + newTaskDuration > dailyLimit) {
-      alert(`Cannot add task. This would exceed your daily calculated limit of ${dailyLimit.toFixed(1)} hours based on your ${user.weeklyGoalHours}h weekly goal.`);
+      alert(`Cannot add task. This would exceed your daily calculated limit of ${dailyLimit.toFixed(1)} hours.`);
       return;
     }
 
+    const tempId = crypto.randomUUID();
     const newTask: Task = {
-      id: crypto.randomUUID(),
+      id: tempId,
       title: newTaskTitle,
       description: newTaskDesc,
       type: newTaskType,
@@ -50,9 +52,32 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
       status: VerificationStatus.PENDING
     };
 
+    // Optimistic Update
     setTasks(prev => [newTask, ...prev]);
     setIsModalOpen(false);
     resetForm();
+
+    // DB Insert
+    const { data, error } = await supabase.from('tasks').insert({
+      user_id: user.googleId,
+      title: newTask.title,
+      description: newTask.description,
+      type: newTask.type,
+      duration_hours: newTask.durationHours,
+      status: newTask.status,
+      created_at: newTask.createdAt
+    }).select();
+
+    // Update with real ID from DB if successful
+    if (data && data[0]) {
+      setTasks(prev => prev.map(t => t.id === tempId ? { ...t, id: data[0].id } : t));
+    }
+    if (error) {
+      console.error("Error creating task", error);
+      // Revert optimistic update
+      setTasks(prev => prev.filter(t => t.id !== tempId));
+      alert("Failed to save task to database.");
+    }
   };
 
   const resetForm = () => {
@@ -83,8 +108,11 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
       const result = await verifyTaskProof(taskToVerify, base64String, file.type);
       
       setVerifyingId(null);
+      let newStatus = VerificationStatus.PENDING;
+      let rejectionReason = "";
+
       if (result.verified) {
-         const newStatus = VerificationStatus.VERIFIED;
+         newStatus = VerificationStatus.VERIFIED;
          setTasks(prev => prev.map(t => 
              t.id === selectedTaskForUpload 
              ? { ...t, status: newStatus, completedAt: Date.now(), proofImage: base64String } 
@@ -92,14 +120,24 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
          ));
          updateCompletedHours(taskToVerify.durationHours);
       } else {
+         newStatus = VerificationStatus.REJECTED;
+         rejectionReason = result.reason || "Verification failed";
          setTasks(prev => prev.map(t => 
              t.id === selectedTaskForUpload 
-             ? { ...t, status: VerificationStatus.REJECTED, rejectionReason: result.reason } 
+             ? { ...t, status: newStatus, rejectionReason: rejectionReason } 
              : t
          ));
-         alert(`Verification Failed: ${result.reason}`);
+         alert(`Verification Failed: ${rejectionReason}`);
       }
       
+      // Update DB
+      await supabase.from('tasks').update({
+        status: newStatus,
+        completed_at: result.verified ? Date.now() : null,
+        proof_image: base64String, // Note: Optimally, this should be a Storage URL
+        rejection_reason: rejectionReason
+      }).eq('id', selectedTaskForUpload);
+
       setSelectedTaskForUpload(null);
     };
     reader.readAsDataURL(file);
