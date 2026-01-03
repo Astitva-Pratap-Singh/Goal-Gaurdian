@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area, XAxis, YAxis, Tooltip, BarChart, Bar } from 'recharts';
+import { ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area, XAxis, YAxis, Tooltip, BarChart, Bar, CartesianGrid } from 'recharts';
 import { Icons } from './Icons';
 import { UserProfile, WeeklyStats, Task, TaskType } from '../types';
 
@@ -20,6 +20,36 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, stats, tasks }) => {
       { name: 'Study', value: study, color: '#818cf8' }, // Indigo 400
       { name: 'Work', value: work, color: '#2dd4bf' }, // Teal 400
     ];
+  }, [tasks]);
+
+  const weeklyActivity = useMemo(() => {
+    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    const now = new Date();
+    // Get start of current week (Monday)
+    const currentDay = now.getDay(); // 0=Sun, 1=Mon
+    const distanceToMonday = currentDay === 0 ? 6 : currentDay - 1;
+    
+    const monday = new Date(now);
+    monday.setDate(now.getDate() - distanceToMonday);
+    monday.setHours(0, 0, 0, 0);
+    const nextMonday = new Date(monday);
+    nextMonday.setDate(monday.getDate() + 7);
+
+    const data = days.map(d => ({ day: d, hours: 0 }));
+
+    tasks.forEach(task => {
+        if (task.status === 'VERIFIED' && task.completedAt) {
+            const tDate = new Date(task.completedAt);
+            if (tDate >= monday && tDate < nextMonday) {
+                const diffTime = tDate.getTime() - monday.getTime();
+                const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+                if (diffDays >= 0 && diffDays < 7) {
+                    data[diffDays].hours += task.durationHours;
+                }
+            }
+        }
+    });
+    return data;
   }, [tasks]);
 
   const ratingColor = stats.rating >= 7 ? 'text-green-400' : stats.rating >= 4 ? 'text-yellow-400' : 'text-red-400';
@@ -59,7 +89,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, stats, tasks }) => {
              <ResponsiveContainer width="100%" height="100%">
                <PieChart>
                  <Pie
-                   data={[{ value: stats.completedHours }, { value: stats.goalHours - stats.completedHours }]}
+                   data={[{ value: stats.completedHours }, { value: Math.max(0, stats.goalHours - stats.completedHours) }]}
                    innerRadius={35}
                    outerRadius={45}
                    startAngle={90}
@@ -121,24 +151,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, stats, tasks }) => {
         <div className="lg:col-span-2 bg-slate-900 p-6 rounded-2xl border border-slate-800">
            <h3 className="text-lg font-semibold text-white mb-6">Activity This Week</h3>
            <div className="h-64">
-             {/* Mocking weekly data visualization for the 'this week' view */}
              <ResponsiveContainer width="100%" height="100%">
-               <AreaChart data={[
-                 { day: 'Mon', hours: 0 }, { day: 'Tue', hours: 0 }, { day: 'Wed', hours: 0 }, 
-                 { day: 'Thu', hours: 0 }, { day: 'Fri', hours: 0 }, { day: 'Sat', hours: 0 }, { day: 'Sun', hours: 0 } 
-                 // In a real app, populate this from logs
-               ]}>
+               <AreaChart data={weeklyActivity}>
                  <defs>
                    <linearGradient id="colorHours" x1="0" y1="0" x2="0" y2="1">
                      <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3}/>
                      <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
                    </linearGradient>
                  </defs>
+                 <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
                  <XAxis dataKey="day" stroke="#475569" fontSize={12} tickLine={false} axisLine={false} />
                  <YAxis stroke="#475569" fontSize={12} tickLine={false} axisLine={false} />
                  <Tooltip 
                     contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#f8fafc' }}
                     itemStyle={{ color: '#818cf8' }}
+                    formatter={(value: number) => [`${value.toFixed(1)} hrs`, 'Activity']}
                  />
                  <Area type="monotone" dataKey="hours" stroke="#6366f1" strokeWidth={3} fillOpacity={1} fill="url(#colorHours)" />
                </AreaChart>
@@ -153,9 +180,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, stats, tasks }) => {
                 <BarChart data={[
                   { name: 'This Week', prod: stats.completedHours, screen: stats.screenTimeHours }
                 ]}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
                   <XAxis dataKey="name" stroke="#475569" fontSize={12} tickLine={false} axisLine={false} />
                   <YAxis stroke="#475569" fontSize={12} tickLine={false} axisLine={false} />
-                  <Tooltip cursor={{fill: '#1e293b'}} contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155' }} />
+                  <Tooltip 
+                    cursor={{fill: '#1e293b'}} 
+                    contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc' }} 
+                    formatter={(value: number) => [`${value.toFixed(1)} hrs`]}
+                  />
                   <Bar dataKey="prod" name="Work" fill="#2dd4bf" radius={[4, 4, 0, 0]} barSize={40} />
                   <Bar dataKey="screen" name="Screen" fill="#f43f5e" radius={[4, 4, 0, 0]} barSize={40} />
                 </BarChart>
