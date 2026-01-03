@@ -16,11 +16,12 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [verifyingId, setVerifyingId] = useState<string | null>(null);
   
-  // New Task Form State
+  // New/Edit Task Form State
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskDesc, setNewTaskDesc] = useState('');
   const [newTaskType, setNewTaskType] = useState<TaskType>(TaskType.WORK);
   const [newTaskDuration, setNewTaskDuration] = useState<number>(1);
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedTaskForUpload, setSelectedTaskForUpload] = useState<string | null>(null);
@@ -34,50 +35,96 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
   });
   const todayUsed = todayTasks.reduce((acc, t) => acc + t.durationHours, 0);
 
-  const handleAddTask = async () => {
+  const openCreateModal = () => {
+    resetForm();
+    setIsModalOpen(true);
+  };
+
+  const openEditModal = (task: Task) => {
+    setNewTaskTitle(task.title);
+    setNewTaskDesc(task.description);
+    setNewTaskType(task.type);
+    setNewTaskDuration(task.durationHours);
+    setEditingTaskId(task.id);
+    setIsModalOpen(true);
+  };
+
+  const handleSaveTask = async () => {
     if (!newTaskTitle || newTaskDuration <= 0) return;
 
-    if (todayUsed + newTaskDuration > dailyLimit) {
-      alert(`Cannot add task. This would exceed your daily calculated limit of ${dailyLimit.toFixed(1)} hours.`);
-      return;
+    // Check limits (skip limit check if editing and duration hasn't increased, or handle smarter logic)
+    // For simplicity, strict check on creation, loose on edit unless duration increases significantly
+    if (!editingTaskId) {
+        if (todayUsed + newTaskDuration > dailyLimit) {
+            alert(`Cannot add task. This would exceed your daily calculated limit of ${dailyLimit.toFixed(1)} hours.`);
+            return;
+        }
     }
 
-    const tempId = crypto.randomUUID();
-    const newTask: Task = {
-      id: tempId,
-      title: newTaskTitle,
-      description: newTaskDesc,
-      type: newTaskType,
-      durationHours: newTaskDuration,
-      createdAt: Date.now(),
-      status: VerificationStatus.PENDING
-    };
+    if (editingTaskId) {
+        // UPDATE EXISTING TASK
+        setTasks(prev => prev.map(t => t.id === editingTaskId ? {
+            ...t,
+            title: newTaskTitle,
+            description: newTaskDesc,
+            type: newTaskType,
+            durationHours: newTaskDuration
+        } : t));
 
-    // Optimistic Update
-    setTasks(prev => [newTask, ...prev]);
-    setIsModalOpen(false);
-    resetForm();
+        setIsModalOpen(false);
+        resetForm();
 
-    // DB Insert
-    const { data, error } = await supabase.from('tasks').insert({
-      user_id: user.googleId,
-      title: newTask.title,
-      description: newTask.description,
-      type: newTask.type,
-      duration_hours: newTask.durationHours,
-      status: newTask.status,
-      created_at: newTask.createdAt
-    }).select();
+        const { error } = await supabase.from('tasks').update({
+            title: newTaskTitle,
+            description: newTaskDesc,
+            type: newTaskType,
+            duration_hours: newTaskDuration
+        }).eq('id', editingTaskId);
 
-    // Update with real ID from DB if successful
-    if (data && data[0]) {
-      setTasks(prev => prev.map(t => t.id === tempId ? { ...t, id: data[0].id } : t));
-    }
-    if (error) {
-      console.error("Error creating task", error);
-      // Revert optimistic update
-      setTasks(prev => prev.filter(t => t.id !== tempId));
-      alert("Failed to save task to database.");
+        if (error) {
+            console.error("Error updating task", error);
+            alert("Failed to update task.");
+        }
+
+    } else {
+        // CREATE NEW TASK
+        const tempId = crypto.randomUUID();
+        const newTask: Task = {
+            id: tempId,
+            title: newTaskTitle,
+            description: newTaskDesc,
+            type: newTaskType,
+            durationHours: newTaskDuration,
+            createdAt: Date.now(),
+            status: VerificationStatus.PENDING
+        };
+
+        // Optimistic Update
+        setTasks(prev => [newTask, ...prev]);
+        setIsModalOpen(false);
+        resetForm();
+
+        // DB Insert
+        const { data, error } = await supabase.from('tasks').insert({
+            user_id: user.googleId,
+            title: newTask.title,
+            description: newTask.description,
+            type: newTask.type,
+            duration_hours: newTask.durationHours,
+            status: newTask.status,
+            created_at: newTask.createdAt
+        }).select();
+
+        // Update with real ID from DB if successful
+        if (data && data[0]) {
+            setTasks(prev => prev.map(t => t.id === tempId ? { ...t, id: data[0].id } : t));
+        }
+        if (error) {
+            console.error("Error creating task", error);
+            // Revert optimistic update
+            setTasks(prev => prev.filter(t => t.id !== tempId));
+            alert("Failed to save task to database.");
+        }
     }
   };
 
@@ -86,6 +133,24 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
     setNewTaskDesc('');
     setNewTaskDuration(1);
     setNewTaskType(TaskType.WORK);
+    setEditingTaskId(null);
+  };
+
+  const handleDeleteTask = async (taskId: string) => {
+    if (!window.confirm("Are you sure you want to remove this task?")) {
+      return;
+    }
+
+    // Optimistic Update
+    setTasks(prev => prev.filter(t => t.id !== taskId));
+
+    // DB Delete
+    const { error } = await supabase.from('tasks').delete().eq('id', taskId);
+
+    if (error) {
+      console.error("Error deleting task", error);
+      alert("Failed to delete task from server.");
+    }
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -175,7 +240,7 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
           </p>
         </div>
         <button 
-          onClick={() => setIsModalOpen(true)}
+          onClick={openCreateModal}
           className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors font-medium shadow-lg shadow-indigo-900/20"
         >
           <Icons.Plus className="w-5 h-5" />
@@ -192,7 +257,19 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
         )}
 
         {tasks.map(task => (
-          <div key={task.id} className={`bg-slate-900 border ${task.status === VerificationStatus.VERIFIED ? 'border-green-900/50 bg-green-900/5' : task.status === VerificationStatus.REJECTED ? 'border-red-900/50' : 'border-slate-800'} rounded-xl p-5 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 transition-all hover:border-slate-700`}>
+          <div key={task.id} className={`bg-slate-900 border ${task.status === VerificationStatus.VERIFIED ? 'border-green-900/50 bg-green-900/5' : task.status === VerificationStatus.REJECTED ? 'border-red-900/50' : 'border-slate-800'} rounded-xl p-5 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 transition-all hover:border-slate-700 group relative`}>
+            
+            {/* Edit Button for Pending/Rejected Tasks */}
+            {task.status !== VerificationStatus.VERIFIED && task.status !== VerificationStatus.VERIFYING && (
+                <button 
+                    onClick={() => openEditModal(task)}
+                    className="absolute top-4 right-4 text-slate-500 hover:text-indigo-400 p-1 rounded hover:bg-slate-800 transition-colors"
+                    title="Edit Task"
+                >
+                    <Icons.Edit className="w-4 h-4" />
+                </button>
+            )}
+
             <div className="flex-1">
               <div className="flex items-center gap-2 mb-1">
                 <span className={`text-xs px-2 py-0.5 rounded border ${task.type === TaskType.STUDY ? 'bg-indigo-950/50 border-indigo-900 text-indigo-400' : 'bg-teal-950/50 border-teal-900 text-teal-400'}`}>
@@ -205,7 +282,7 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
                     <span className="text-xs text-red-400 bg-red-950/30 px-2 rounded">Rejected: {task.rejectionReason}</span>
                 )}
               </div>
-              <h3 className="text-lg font-semibold text-slate-100">{task.title}</h3>
+              <h3 className="text-lg font-semibold text-slate-100 pr-8">{task.title}</h3>
               <p className="text-slate-400 text-sm mt-1">{task.description}</p>
               
               {/* Show proof link if verified and URL exists */}
@@ -216,11 +293,20 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
               )}
             </div>
 
-            <div className="w-full md:w-auto flex justify-end">
+            <div className="w-full md:w-auto flex justify-end mt-4 md:mt-0">
                {task.status === VerificationStatus.VERIFIED ? (
-                 <div className="flex items-center gap-2 text-green-500 px-4 py-2 bg-green-950/20 rounded-lg border border-green-900/50">
-                    <Icons.CheckCircle className="w-5 h-5" />
-                    <span className="font-medium">Completed</span>
+                 <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 text-green-500 px-4 py-2 bg-green-950/20 rounded-lg border border-green-900/50">
+                       <Icons.CheckCircle className="w-5 h-5" />
+                       <span className="font-medium">Completed</span>
+                    </div>
+                    <button 
+                      onClick={() => handleDeleteTask(task.id)}
+                      className="p-2 text-slate-500 hover:text-red-400 hover:bg-red-950/30 rounded-lg transition-colors border border-transparent hover:border-red-900/50"
+                      title="Remove Task"
+                    >
+                      <Icons.Trash className="w-5 h-5" />
+                    </button>
                  </div>
                ) : verifyingId === task.id ? (
                  <div className="flex items-center gap-2 text-indigo-400 px-4 py-2 animate-pulse">
@@ -228,13 +314,23 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
                     <span>AI Verifying...</span>
                  </div>
                ) : (
-                 <button 
-                   onClick={() => triggerUpload(task.id)}
-                   className="w-full md:w-auto flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded-lg border border-slate-700 transition-colors"
-                 >
-                   <Icons.Upload className="w-4 h-4" />
-                   Submit Proof
-                 </button>
+                 <div className="flex gap-2 w-full md:w-auto">
+                    {/* Allow deleting pending tasks too, usually good UX */}
+                    <button 
+                      onClick={() => handleDeleteTask(task.id)}
+                      className="p-2 text-slate-500 hover:text-red-400 hover:bg-red-950/30 rounded-lg transition-colors border border-slate-700 hover:border-red-900/50"
+                      title="Delete Task"
+                    >
+                      <Icons.Trash className="w-4 h-4" />
+                    </button>
+                    <button 
+                        onClick={() => triggerUpload(task.id)}
+                        className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded-lg border border-slate-700 transition-colors"
+                    >
+                        <Icons.Upload className="w-4 h-4" />
+                        Submit Proof
+                    </button>
+                 </div>
                )}
             </div>
           </div>
@@ -250,11 +346,11 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
         className="hidden" 
       />
 
-      {/* Add Task Modal */}
+      {/* Add/Edit Task Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-700 w-full max-w-md rounded-2xl p-6 shadow-2xl">
-            <h3 className="text-xl font-bold text-white mb-4">New Task</h3>
+            <h3 className="text-xl font-bold text-white mb-4">{editingTaskId ? 'Edit Task' : 'New Task'}</h3>
             
             <div className="space-y-4">
               <div>
@@ -312,10 +408,10 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
                 Cancel
               </button>
               <button 
-                onClick={handleAddTask}
+                onClick={handleSaveTask}
                 className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium"
               >
-                Create
+                {editingTaskId ? 'Save Changes' : 'Create'}
               </button>
             </div>
           </div>

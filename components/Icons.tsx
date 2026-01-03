@@ -11,7 +11,9 @@ import {
   LogOut,
   Target,
   Smartphone,
-  Plus
+  Plus,
+  Trash2,
+  Pencil
 } from 'lucide-react';
 
 export const Icons = {
@@ -26,5 +28,7 @@ export const Icons = {
   LogOut,
   Target,
   Smartphone,
-  Plus
+  Plus,
+  Trash: Trash2,
+  Edit: Pencil
 };
