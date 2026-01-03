@@ -12,8 +12,24 @@ declare global {
   }
 }
 
+// Helper to safely get Env Vars in Vite or Standard environments
+const getEnv = (key: string) => {
+  // @ts-ignore
+  if (typeof import.meta !== 'undefined' && import.meta.env) {
+    // @ts-ignore
+    return import.meta.env[`VITE_${key}`] || import.meta.env[key];
+  }
+  // @ts-ignore
+  if (typeof process !== 'undefined' && process.env) {
+    // @ts-ignore
+    return process.env[`REACT_APP_${key}`] || process.env[key];
+  }
+  return "";
+};
+
 // Get Client ID from environment variable or fallback to a placeholder
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com"; 
+const RAW_CLIENT_ID = getEnv("GOOGLE_CLIENT_ID");
+const GOOGLE_CLIENT_ID = RAW_CLIENT_ID || "YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com"; 
 
 export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
   
@@ -88,7 +104,8 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
              <div id="googleSignInDiv" className="w-full flex justify-center min-h-[40px]">
                 {!isConfigured && (
                   <div className="text-amber-500 text-sm bg-amber-950/30 p-3 rounded border border-amber-900/50 w-full text-center">
-                    Google Auth not configured. <br/> Set GOOGLE_CLIENT_ID env var.
+                    Google Auth not configured. <br/>
+                    Set VITE_GOOGLE_CLIENT_ID in Vercel Env Vars.
                   </div>
                 )}
              </div>

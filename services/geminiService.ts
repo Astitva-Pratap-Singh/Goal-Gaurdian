@@ -1,7 +1,24 @@
 import { GoogleGenAI } from "@google/genai";
 import { Task } from "../types";
 
-const getClient = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Helper to safely get Env Vars in Vite or Standard environments
+const getEnv = (key: string) => {
+  // @ts-ignore
+  if (typeof import.meta !== 'undefined' && import.meta.env) {
+    // @ts-ignore
+    return import.meta.env[`VITE_${key}`] || import.meta.env[key];
+  }
+  // @ts-ignore
+  if (typeof process !== 'undefined' && process.env) {
+    // @ts-ignore
+    return process.env[`REACT_APP_${key}`] || process.env[key];
+  }
+  return "";
+};
+
+const API_KEY = getEnv("API_KEY");
+
+const getClient = () => new GoogleGenAI({ apiKey: API_KEY });
 
 export const verifyTaskProof = async (
   task: Task,
@@ -9,6 +26,10 @@ export const verifyTaskProof = async (
   mimeType: string = "image/jpeg"
 ): Promise<{ verified: boolean; reason?: string }> => {
   try {
+    if (!API_KEY) {
+      return { verified: false, reason: "API Key is missing in environment variables." };
+    }
+
     const ai = getClient();
     
     // Clean base64 string if it contains data URI prefix
