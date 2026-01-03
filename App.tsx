@@ -51,7 +51,8 @@ const App: React.FC = () => {
       .from('weekly_stats')
       .select('*')
       .eq('user_id', googleId)
-      .neq('week_id', currentWeekId); // Everything except current week
+      .neq('week_id', currentWeekId)
+      .order('week_id', { ascending: true }); // Ensure chronological order
 
     if (historyData) {
       // Map DB snake_case to camelCase matches types

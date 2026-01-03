@@ -25,7 +25,26 @@ export const History: React.FC<HistoryProps> = ({ history }) => {
     : "0.0";
   
   // Sort history by date for charts
-  const sortedHistory = [...history].reverse(); // Assuming history passed with newest first
+  const sortedHistory = [...history].sort((a, b) => a.weekId.localeCompare(b.weekId));
+
+  const calculateBestStreak = (entries: HistoryEntry[]) => {
+    let maxStreak = 0;
+    let currentStreak = 0;
+    
+    entries.forEach(entry => {
+        // A week counts if goal is met. 
+        if (entry.completedHours >= entry.goalHours) {
+            currentStreak++;
+            maxStreak = Math.max(maxStreak, currentStreak);
+        } else {
+            currentStreak = 0;
+        }
+    });
+    
+    return maxStreak;
+  };
+
+  const bestStreak = calculateBestStreak(sortedHistory);
 
   return (
     <div className="space-y-8 pb-20 md:pb-0">
@@ -63,7 +82,7 @@ export const History: React.FC<HistoryProps> = ({ history }) => {
                 </div>
                 <span className="text-slate-400 text-sm">Best Streak</span>
              </div>
-             <p className="text-2xl font-bold text-white">4 Weeks</p>
+             <p className="text-2xl font-bold text-white">{bestStreak} Weeks</p>
           </div>
 
           <div className="bg-slate-900 p-5 rounded-xl border border-slate-800">
@@ -74,7 +93,7 @@ export const History: React.FC<HistoryProps> = ({ history }) => {
                 <span className="text-slate-400 text-sm">Avg Screen Time</span>
              </div>
              <p className="text-2xl font-bold text-white">
-                {(history.reduce((acc, curr) => acc + curr.screenTimeHours, 0) / (history.length || 1)).toFixed(1)}h
+                {(history.length > 0 ? history.reduce((acc, curr) => acc + curr.screenTimeHours, 0) / history.length : 0).toFixed(1)}h
              </p>
           </div>
        </div>
@@ -138,7 +157,7 @@ export const History: React.FC<HistoryProps> = ({ history }) => {
                    </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
-                   {history.map((entry) => (
+                   {[...sortedHistory].reverse().map((entry) => (
                       <tr key={entry.id} className="hover:bg-slate-800/50 transition-colors">
                          <td className="px-6 py-4 text-slate-300 font-medium">{entry.weekId}</td>
                          <td className="px-6 py-4 text-slate-500 text-sm">{entry.startDate} - {entry.endDate}</td>
@@ -157,7 +176,7 @@ export const History: React.FC<HistoryProps> = ({ history }) => {
                             <div className="flex items-center gap-2">
                                <span className={`font-bold ${entry.rating >= 7 ? 'text-green-400' : entry.rating >= 4 ? 'text-yellow-400' : 'text-red-400'}`}>
                                   {entry.rating}
-                               </span>
+                                </span>
                             </div>
                          </td>
                       </tr>
