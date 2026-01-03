@@ -30,7 +30,7 @@ export const ScreenTimeUpload: React.FC<ScreenTimeUploadProps> = ({ user, onSubm
     if (hours >= 0 && file && user) {
       try {
         setIsUploading(true);
-        // Upload to R2 (Optimized)
+        // Upload simulation (Stores Base64)
         const url = await uploadToR2(file, user.googleId, 'screentime');
         
         onSubmit(hours, url);
@@ -40,7 +40,7 @@ export const ScreenTimeUpload: React.FC<ScreenTimeUploadProps> = ({ user, onSubm
         alert("Screen time logged successfully.");
       } catch (error) {
         console.error(error);
-        alert("Failed to upload image. Please check credentials.");
+        alert("Failed to process image.");
       } finally {
         setIsUploading(false);
       }
@@ -105,7 +105,7 @@ export const ScreenTimeUpload: React.FC<ScreenTimeUploadProps> = ({ user, onSubm
               : 'bg-slate-800 text-slate-500 cursor-not-allowed'
             }`}
           >
-            {isUploading ? 'Uploading & Optimizing...' : 'Submit Report'}
+            {isUploading ? 'Processing...' : 'Submit Report'}
           </button>
         </div>
       </div>

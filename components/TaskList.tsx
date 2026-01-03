@@ -52,8 +52,7 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
   const handleSaveTask = async () => {
     if (!newTaskTitle || newTaskDuration <= 0) return;
 
-    // Check limits (skip limit check if editing and duration hasn't increased, or handle smarter logic)
-    // For simplicity, strict check on creation, loose on edit unless duration increases significantly
+    // Check limits
     if (!editingTaskId) {
         if (todayUsed + newTaskDuration > dailyLimit) {
             alert(`Cannot add task. This would exceed your daily calculated limit of ${dailyLimit.toFixed(1)} hours.`);
@@ -121,7 +120,6 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
         }
         if (error) {
             console.error("Error creating task", error);
-            // Revert optimistic update
             setTasks(prev => prev.filter(t => t.id !== tempId));
             alert("Failed to save task to database.");
         }
@@ -141,10 +139,7 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
       return;
     }
 
-    // Optimistic Update
     setTasks(prev => prev.filter(t => t.id !== taskId));
-
-    // DB Delete
     const { error } = await supabase.from('tasks').delete().eq('id', taskId);
 
     if (error) {
@@ -161,16 +156,13 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
     if (taskIndex === -1) return;
     const taskToVerify = tasks[taskIndex];
 
-    // Optimistic update to VERIFYING
     setVerifyingId(selectedTaskForUpload);
     updateTaskStatus(selectedTaskForUpload, VerificationStatus.VERIFYING);
 
-    // 1. Read as Base64 for AI Verification
     const reader = new FileReader();
     reader.onloadend = async () => {
       const base64String = reader.result as string;
       
-      // Call AI Service
       const result = await verifyTaskProof(taskToVerify, base64String, file.type);
       
       let newStatus = VerificationStatus.PENDING;
@@ -179,7 +171,7 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
 
       if (result.verified) {
          try {
-           // 2. Upload to Cloudflare R2 (Optimized)
+           // Store optimized image (simulated upload)
            publicUrl = await uploadToR2(file, user.googleId, 'tasks');
            newStatus = VerificationStatus.VERIFIED;
            
@@ -190,9 +182,8 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
            ));
            updateCompletedHours(taskToVerify.durationHours);
          } catch (uploadErr) {
-           console.error("Upload failed", uploadErr);
-           alert("Verification successful, but upload failed. Check R2 configuration.");
-           // Fallback to verified without image URL if strict persistence isn't required for 'verified' state
+           console.error("Storage failed", uploadErr);
+           alert("Verification successful, but saving proof failed.");
            newStatus = VerificationStatus.VERIFIED; 
          }
       } else {
@@ -208,7 +199,6 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
       
       setVerifyingId(null);
       
-      // Update DB
       await supabase.from('tasks').update({
         status: newStatus,
         completed_at: result.verified ? Date.now() : null,
@@ -259,7 +249,6 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
         {tasks.map(task => (
           <div key={task.id} className={`bg-slate-900 border ${task.status === VerificationStatus.VERIFIED ? 'border-green-900/50 bg-green-900/5' : task.status === VerificationStatus.REJECTED ? 'border-red-900/50' : 'border-slate-800'} rounded-xl p-5 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 transition-all hover:border-slate-700 group relative`}>
             
-            {/* Edit Button for Pending/Rejected Tasks */}
             {task.status !== VerificationStatus.VERIFIED && task.status !== VerificationStatus.VERIFYING && (
                 <button 
                     onClick={() => openEditModal(task)}
@@ -285,7 +274,6 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
               <h3 className="text-lg font-semibold text-slate-100 pr-8">{task.title}</h3>
               <p className="text-slate-400 text-sm mt-1">{task.description}</p>
               
-              {/* Show proof link if verified and URL exists */}
               {task.status === VerificationStatus.VERIFIED && task.proofImage && (
                   <a href={task.proofImage} target="_blank" rel="noopener noreferrer" className="text-xs text-indigo-400 hover:underline mt-2 inline-block">
                     View Verified Proof
@@ -329,7 +317,6 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
         ))}
       </div>
 
-      {/* Hidden File Input */}
       <input 
         type="file" 
         ref={fileInputRef} 
@@ -338,7 +325,6 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
         className="hidden" 
       />
 
-      {/* Add/Edit Task Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-700 w-full max-w-md rounded-2xl p-6 shadow-2xl">
