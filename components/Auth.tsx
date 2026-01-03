@@ -74,8 +74,8 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
   const handleDevLogin = () => {
     onLogin({
       name: "Demo User",
-      email: "demo@focusforge.ai",
-      avatarUrl: "https://api.dicebear.com/7.x/avataaars/svg?seed=FocusForge",
+      email: "demo@goalguardian.ai",
+      avatarUrl: "https://api.dicebear.com/7.x/avataaars/svg?seed=GoalGuardian",
       googleId: "dev-123"
     });
   };
@@ -94,7 +94,7 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
           <div className="w-16 h-16 bg-indigo-600 rounded-xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-indigo-900/50">
             <Icons.Shield className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-3xl font-bold text-white mb-2">FocusForge</h1>
+          <h1 className="text-3xl font-bold text-white mb-2">Goal Guardian</h1>
           <p className="text-slate-400">Strict, AI-Verified Productivity.</p>
         </div>
 

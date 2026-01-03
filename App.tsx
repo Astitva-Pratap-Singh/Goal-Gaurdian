@@ -46,6 +46,16 @@ const App: React.FC = () => {
     setIsLoading(true);
     const currentWeekId = getCurrentWeekId();
 
+    // 0. Fetch User Profile to get goal
+    const { data: profile } = await supabase.from('profiles').select('*').eq('google_id', googleId).single();
+    if (profile && user) {
+       // Update user goal from DB
+       const updatedUser = { ...user, weeklyGoalHours: profile.weekly_goal_hours || 80 };
+       setUser(updatedUser);
+       // Save to local storage for persistence
+       localStorage.setItem('focusforge_user', JSON.stringify(updatedUser));
+    }
+
     // 1. Fetch History
     const { data: historyData } = await supabase
       .from('weekly_stats')
@@ -54,6 +64,8 @@ const App: React.FC = () => {
       .neq('week_id', currentWeekId)
       .order('week_id', { ascending: true }); // Ensure chronological order
 
+    let calculatedStreak = 0;
+    
     if (historyData) {
       // Map DB snake_case to camelCase matches types
       const formattedHistory: HistoryEntry[] = historyData.map((h: any) => ({
@@ -68,7 +80,29 @@ const App: React.FC = () => {
         endDate: h.end_date
       }));
       setHistory(formattedHistory);
+
+      // Recalculate Streak: Count consecutive past weeks where goal was met
+      // Sort descending to count from most recent back
+      const reversedHistory = [...formattedHistory].sort((a, b) => b.weekId.localeCompare(a.weekId));
+      
+      for (const entry of reversedHistory) {
+         if (entry.completedHours >= entry.goalHours) {
+           calculatedStreak++;
+         } else {
+           break; 
+         }
+      }
+    } else {
+      setHistory([]);
     }
+
+    // Update User Streak
+    setUser((prev) => {
+        if (!prev) return null;
+        const updated = { ...prev, currentStreak: calculatedStreak };
+        localStorage.setItem('focusforge_user', JSON.stringify(updated));
+        return updated;
+    });
 
     // 2. Fetch Current Week Stats or Create
     const { data: currentStats, error } = await supabase
@@ -96,11 +130,13 @@ const App: React.FC = () => {
       const endOfWeek = new Date(startOfWeek);
       endOfWeek.setDate(endOfWeek.getDate() + 6); // Sunday
 
+      const currentGoal = profile?.weekly_goal_hours || 80;
+
       const newStats: WeeklyStats = {
         weekId: currentWeekId,
         startDate: startOfWeek.toLocaleDateString(),
         endDate: endOfWeek.toLocaleDateString(),
-        goalHours: 80,
+        goalHours: currentGoal,
         completedHours: 0,
         screenTimeHours: 0,
         rating: 0,
@@ -145,13 +181,22 @@ const App: React.FC = () => {
   };
 
   const handleLogin = async (userData: any) => {
-    // Upsert User to Supabase
+    // 1. Try to fetch existing profile first to get their specific goal
+    const { data: existingProfile } = await supabase.from('profiles').select('weekly_goal_hours').eq('google_id', userData.googleId).single();
+    
+    const userGoal = existingProfile?.weekly_goal_hours || 80;
+
+    // 2. Upsert User to Supabase
     const { error } = await supabase.from('profiles').upsert({
       google_id: userData.googleId,
       email: userData.email,
       name: userData.name,
       avatar_url: userData.avatarUrl,
-      weekly_goal_hours: 80
+      // Only set default if it's a new insert (though upsert overwrites, we want to preserve if possible, 
+      // but without complex logic, we just ensure the column exists. 
+      // Actually standard upsert overwrites. We should only update relevant fields or use ignore duplicates?
+      // For now, let's just update identity info and keep goal if we fetched it, or set default.
+      weekly_goal_hours: userGoal 
     }, { onConflict: 'google_id' });
 
     if (error) {
@@ -163,7 +208,7 @@ const App: React.FC = () => {
       email: userData.email,
       avatarUrl: userData.avatarUrl,
       googleId: userData.googleId,
-      weeklyGoalHours: 80, 
+      weeklyGoalHours: userGoal, 
       currentStreak: 0 
     };
     setUser(newUser);
@@ -179,6 +224,27 @@ const App: React.FC = () => {
     setTasks([]);
     setHistory([]);
     setIsAuthenticated(false);
+  };
+
+  const updateWeeklyGoal = async (newGoal: number) => {
+    if (!user) return;
+    
+    // Update State
+    const updatedUser = { ...user, weeklyGoalHours: newGoal };
+    setUser(updatedUser);
+    localStorage.setItem('focusforge_user', JSON.stringify(updatedUser));
+    
+    // Update DB Profile
+    await supabase.from('profiles').update({ weekly_goal_hours: newGoal }).eq('google_id', user.googleId);
+    
+    // Update Current Week Stats Goal if exists
+    if (stats) {
+        setStats({ ...stats, goalHours: newGoal });
+        await supabase.from('weekly_stats')
+            .update({ goal_hours: newGoal })
+            .eq('user_id', user.googleId)
+            .eq('week_id', stats.weekId);
+    }
   };
 
   const updateCompletedHours = async (hoursToAdd: number) => {
@@ -237,6 +303,7 @@ const App: React.FC = () => {
         currentView={currentView} 
         setView={setCurrentView} 
         onLogout={handleLogout}
+        onUpdateGoal={updateWeeklyGoal}
       />
       
       <main className="flex-1 md:ml-64 p-4 md:p-8 overflow-y-auto h-screen">
