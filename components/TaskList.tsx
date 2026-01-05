@@ -28,11 +28,28 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
 
   // Daily Limit Calculation
   const dailyLimit = user.weeklyGoalHours / 7;
-  // Calculate today's verified + pending tasks duration
+  
+  // Calculate today's load:
+  // 1. Tasks COMPLETED today (Verified with today's timestamp) - Counts as work done today.
+  // 2. Tasks CREATED today that are still PENDING/VERIFYING - Counts as work planned for today.
+  // Rejected tasks are excluded.
   const todayTasks = tasks.filter(t => {
-      const isToday = new Date(t.createdAt).toDateString() === new Date().toDateString();
-      return isToday && t.status !== VerificationStatus.REJECTED;
+      if (t.status === VerificationStatus.REJECTED) return false;
+
+      const now = new Date();
+      const todayString = now.toDateString();
+
+      // If verified, check completion date
+      if (t.status === VerificationStatus.VERIFIED && t.completedAt) {
+          const completedDate = new Date(t.completedAt);
+          return completedDate.toDateString() === todayString;
+      }
+
+      // If pending/verifying, check creation date
+      const createdDate = new Date(t.createdAt);
+      return createdDate.toDateString() === todayString;
   });
+
   const todayUsed = todayTasks.reduce((acc, t) => acc + t.durationHours, 0);
 
   const openCreateModal = () => {
@@ -111,7 +128,7 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
             type: newTask.type,
             duration_hours: newTask.durationHours,
             status: newTask.status,
-            created_at: newTask.createdAt
+            created_at: new Date(newTask.createdAt).toISOString() // Ensure ISO string for DB
         }).select();
 
         // Update with real ID from DB if successful
@@ -199,9 +216,11 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
       
       setVerifyingId(null);
       
+      const completedAt = result.verified ? new Date().toISOString() : null;
+
       await supabase.from('tasks').update({
         status: newStatus,
-        completed_at: result.verified ? Date.now() : null,
+        completed_at: completedAt,
         proof_image: publicUrl || null,
         rejection_reason: rejectionReason
       }).eq('id', selectedTaskForUpload);
