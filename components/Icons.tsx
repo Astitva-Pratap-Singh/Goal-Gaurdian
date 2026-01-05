@@ -15,7 +15,8 @@ import {
   Trash2, 
   Pencil,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Eye
 } from 'lucide-react';
 
 export const Icons = {
@@ -34,5 +35,6 @@ export const Icons = {
   Trash: Trash2,
   Edit: Pencil,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Eye
 };

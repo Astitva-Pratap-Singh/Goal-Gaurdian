@@ -26,6 +26,9 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedTaskForUpload, setSelectedTaskForUpload] = useState<string | null>(null);
 
+  // Proof Preview State
+  const [previewProof, setPreviewProof] = useState<string | null>(null);
+
   // Daily Limit Calculation
   const dailyLimit = user.weeklyGoalHours / 7;
   
@@ -296,9 +299,13 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
               <p className="text-slate-400 text-sm mt-1">{task.description}</p>
               
               {task.status === VerificationStatus.VERIFIED && task.proofImage && (
-                  <a href={task.proofImage} target="_blank" rel="noopener noreferrer" className="text-xs text-indigo-400 hover:underline mt-2 inline-block">
-                    View Verified Proof
-                  </a>
+                  <button 
+                    onClick={() => setPreviewProof(task.proofImage!)}
+                    className="flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 hover:bg-indigo-950/30 px-2 py-1 -ml-2 mt-2 rounded transition-colors"
+                  >
+                    <Icons.Eye className="w-4 h-4" />
+                    View Proof
+                  </button>
               )}
             </div>
 
@@ -346,6 +353,47 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
         className="hidden" 
       />
 
+      {/* Proof Preview Modal */}
+      {previewProof && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/90 backdrop-blur-sm" onClick={() => setPreviewProof(null)}>
+              <div className="relative max-w-4xl w-full bg-slate-900 rounded-xl overflow-hidden shadow-2xl flex flex-col border border-slate-700 animate-in fade-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
+                  <div className="flex justify-between items-center p-4 border-b border-slate-800 bg-slate-950/50">
+                      <h3 className="text-white font-medium flex items-center gap-2">
+                          <Icons.Shield className="w-4 h-4 text-indigo-400" />
+                          Verified Proof
+                      </h3>
+                      <button onClick={() => setPreviewProof(null)} className="text-slate-400 hover:text-white transition-colors">
+                          <Icons.XCircle className="w-6 h-6" />
+                      </button>
+                  </div>
+                  <div className="flex-1 bg-black/50 flex items-center justify-center p-1 min-h-[50vh] max-h-[80vh] overflow-auto">
+                      {previewProof.includes('application/pdf') ? (
+                          <object data={previewProof} type="application/pdf" className="w-full h-[70vh] rounded bg-white">
+                              <div className="flex flex-col items-center justify-center h-full text-slate-400 gap-2">
+                                  <p>PDF preview not available.</p>
+                                  <a href={previewProof} download="proof.pdf" className="text-indigo-400 hover:underline">Download PDF</a>
+                              </div>
+                          </object>
+                      ) : (
+                          <img src={previewProof} alt="Proof" className="max-w-full max-h-[75vh] object-contain rounded shadow-lg" />
+                      )}
+                  </div>
+                   <div className="p-4 border-t border-slate-800 flex justify-between items-center bg-slate-900">
+                      <span className="text-xs text-slate-500">Verified by Goal Guardian AI</span>
+                      <a 
+                          href={previewProof} 
+                          download={`proof_${Date.now()}.${previewProof.includes('application/pdf') ? 'pdf' : 'png'}`} 
+                          className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-sm font-medium transition-colors"
+                      >
+                          <Icons.Upload className="w-4 h-4 rotate-180" />
+                          Download File
+                      </a>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* Create/Edit Task Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-700 w-full max-w-md rounded-2xl p-6 shadow-2xl">
