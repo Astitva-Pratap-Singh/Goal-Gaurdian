@@ -5,19 +5,21 @@ import { TaskList } from './components/TaskList';
 import { ScreenTimeUpload } from './components/ScreenTimeUpload';
 import { History } from './components/History';
 import { Auth } from './components/Auth';
-import { UserProfile, WeeklyStats, Task, HistoryEntry } from './types';
+import { UserProfile, WeeklyStats, Task, HistoryEntry, VerificationStatus } from './types';
 import { calculateWeeklyRating } from './services/geminiService';
 import { supabase } from './services/supabase';
 
-// Helper to get current week ID (e.g., "2024-W22")
+// Robust ISO Week ID Calculator (YYYY-Www)
 const getCurrentWeekId = () => {
-  const now = new Date();
-  const start = new Date(now.getFullYear(), 0, 1);
-  const diff = now.getTime() - start.getTime() + ((start.getTimezoneOffset() - now.getTimezoneOffset()) * 60 * 1000);
-  const oneDay = 1000 * 60 * 60 * 24;
-  const day = Math.floor(diff / oneDay);
-  const week = Math.ceil(day / 7);
-  return `${now.getFullYear()}-W${week}`;
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  // Set to nearest Thursday: current date + 4 - current day number
+  // Make Sunday's day number 7
+  d.setDate(d.getDate() + 4 - (d.getDay() || 7));
+  const yearStart = new Date(d.getFullYear(), 0, 1);
+  // Calculate full weeks to nearest Thursday
+  const weekNo = Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  return `${d.getFullYear()}-W${String(weekNo).padStart(2, '0')}`;
 };
 
 const App: React.FC = () => {
@@ -49,25 +51,46 @@ const App: React.FC = () => {
     // 0. Fetch User Profile to get goal
     const { data: profile } = await supabase.from('profiles').select('*').eq('google_id', googleId).single();
     if (profile && user) {
-       // Update user goal from DB
        const updatedUser = { ...user, weeklyGoalHours: profile.weekly_goal_hours || 80 };
        setUser(updatedUser);
-       // Save to local storage for persistence
        localStorage.setItem('focusforge_user', JSON.stringify(updatedUser));
     }
 
-    // 1. Fetch History
+    // 1. Fetch Tasks FIRST to allow recalculation of stats
+    const { data: tasksData } = await supabase
+      .from('tasks')
+      .select('*')
+      .eq('user_id', googleId)
+      .order('created_at', { ascending: false });
+
+    let formattedTasks: Task[] = [];
+    if (tasksData) {
+      formattedTasks = tasksData.map((t: any) => ({
+        id: t.id,
+        title: t.title,
+        description: t.description,
+        type: t.type,
+        durationHours: t.duration_hours,
+        createdAt: t.created_at,
+        completedAt: t.completed_at,
+        status: t.status,
+        proofImage: t.proof_image,
+        rejectionReason: t.rejection_reason
+      }));
+      setTasks(formattedTasks);
+    }
+
+    // 2. Fetch History (Excluding current week)
     const { data: historyData } = await supabase
       .from('weekly_stats')
       .select('*')
       .eq('user_id', googleId)
       .neq('week_id', currentWeekId)
-      .order('week_id', { ascending: true }); // Ensure chronological order
+      .order('week_id', { ascending: true });
 
     let calculatedStreak = 0;
     
     if (historyData) {
-      // Map DB snake_case to camelCase matches types
       const formattedHistory: HistoryEntry[] = historyData.map((h: any) => ({
         id: h.id,
         weekId: h.week_id,
@@ -81,10 +104,8 @@ const App: React.FC = () => {
       }));
       setHistory(formattedHistory);
 
-      // Recalculate Streak: Count consecutive past weeks where goal was met
-      // Sort descending to count from most recent back
+      // Recalculate Streak
       const reversedHistory = [...formattedHistory].sort((a, b) => b.weekId.localeCompare(a.weekId));
-      
       for (const entry of reversedHistory) {
          if (entry.completedHours >= entry.goalHours) {
            calculatedStreak++;
@@ -104,15 +125,44 @@ const App: React.FC = () => {
         return updated;
     });
 
-    // 2. Fetch Current Week Stats or Create
-    const { data: currentStats, error } = await supabase
+    // 3. Fetch Current Week Stats or Create
+    const { data: currentStats } = await supabase
       .from('weekly_stats')
       .select('*')
       .eq('user_id', googleId)
       .eq('week_id', currentWeekId)
       .single();
 
+    // Calculate actual completed hours for THIS week from Tasks
+    // This ensures that if the week switches, we don't accidentally show old data if the DB record was reused or malformed,
+    // and we self-heal any drift between tasks and stats.
+    const now = new Date();
+    const currentDay = now.getDay(); 
+    const distanceToMonday = currentDay === 0 ? 6 : currentDay - 1;
+    const monday = new Date(now);
+    monday.setDate(now.getDate() - distanceToMonday);
+    monday.setHours(0, 0, 0, 0);
+    const nextMonday = new Date(monday);
+    nextMonday.setDate(monday.getDate() + 7);
+
+    const actualCompletedHours = formattedTasks
+      .filter(t => {
+         if (t.status !== VerificationStatus.VERIFIED || !t.completedAt) return false;
+         const d = new Date(t.completedAt);
+         return d >= monday && d < nextMonday;
+      })
+      .reduce((acc, t) => acc + t.durationHours, 0);
+
     if (currentStats) {
+      // Check if we need to self-heal
+      if (Math.abs(currentStats.completed_hours - actualCompletedHours) > 0.1) {
+          await supabase.from('weekly_stats')
+            .update({ completed_hours: actualCompletedHours })
+            .eq('week_id', currentWeekId)
+            .eq('user_id', googleId);
+          currentStats.completed_hours = actualCompletedHours;
+      }
+
       setStats({
         weekId: currentStats.week_id,
         goalHours: currentStats.goal_hours,
@@ -125,19 +175,14 @@ const App: React.FC = () => {
       });
     } else {
       // Create new week entry
-      const startOfWeek = new Date();
-      startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay() + 1); // Monday
-      const endOfWeek = new Date(startOfWeek);
-      endOfWeek.setDate(endOfWeek.getDate() + 6); // Sunday
-
       const currentGoal = profile?.weekly_goal_hours || 80;
 
       const newStats: WeeklyStats = {
         weekId: currentWeekId,
-        startDate: startOfWeek.toLocaleDateString(),
-        endDate: endOfWeek.toLocaleDateString(),
+        startDate: monday.toLocaleDateString(),
+        endDate: new Date(nextMonday.getTime() - 1).toLocaleDateString(),
         goalHours: currentGoal,
-        completedHours: 0,
+        completedHours: actualCompletedHours, // Initialize with what we found (usually 0 for new week)
         screenTimeHours: 0,
         rating: 0,
         streakActive: true
@@ -148,54 +193,25 @@ const App: React.FC = () => {
         week_id: newStats.weekId,
         start_date: newStats.startDate,
         end_date: newStats.endDate,
-        goal_hours: newStats.goalHours
+        goal_hours: newStats.goalHours,
+        completed_hours: newStats.completedHours
       });
 
       if (!insertError) setStats(newStats);
-    }
-
-    // 3. Fetch Tasks
-    const { data: tasksData } = await supabase
-      .from('tasks')
-      .select('*')
-      .eq('user_id', googleId)
-      .order('created_at', { ascending: false });
-
-    if (tasksData) {
-      const formattedTasks: Task[] = tasksData.map((t: any) => ({
-        id: t.id,
-        title: t.title,
-        description: t.description,
-        type: t.type,
-        durationHours: t.duration_hours,
-        createdAt: t.created_at,
-        completedAt: t.completed_at,
-        status: t.status,
-        proofImage: t.proof_image,
-        rejectionReason: t.rejection_reason
-      }));
-      setTasks(formattedTasks);
     }
 
     setIsLoading(false);
   };
 
   const handleLogin = async (userData: any) => {
-    // 1. Try to fetch existing profile first to get their specific goal
     const { data: existingProfile } = await supabase.from('profiles').select('weekly_goal_hours').eq('google_id', userData.googleId).single();
-    
     const userGoal = existingProfile?.weekly_goal_hours || 80;
 
-    // 2. Upsert User to Supabase
     const { error } = await supabase.from('profiles').upsert({
       google_id: userData.googleId,
       email: userData.email,
       name: userData.name,
       avatar_url: userData.avatarUrl,
-      // Only set default if it's a new insert (though upsert overwrites, we want to preserve if possible, 
-      // but without complex logic, we just ensure the column exists. 
-      // Actually standard upsert overwrites. We should only update relevant fields or use ignore duplicates?
-      // For now, let's just update identity info and keep goal if we fetched it, or set default.
       weekly_goal_hours: userGoal 
     }, { onConflict: 'google_id' });
 
@@ -229,15 +245,12 @@ const App: React.FC = () => {
   const updateWeeklyGoal = async (newGoal: number) => {
     if (!user) return;
     
-    // Update State
     const updatedUser = { ...user, weeklyGoalHours: newGoal };
     setUser(updatedUser);
     localStorage.setItem('focusforge_user', JSON.stringify(updatedUser));
     
-    // Update DB Profile
     await supabase.from('profiles').update({ weekly_goal_hours: newGoal }).eq('google_id', user.googleId);
     
-    // Update Current Week Stats Goal if exists
     if (stats) {
         setStats({ ...stats, goalHours: newGoal });
         await supabase.from('weekly_stats')
@@ -257,10 +270,8 @@ const App: React.FC = () => {
        stats.screenTimeHours
      );
 
-     // Update local state
      setStats(prev => prev ? ({ ...prev, completedHours: newCompleted, rating: newRating }) : null);
      
-     // Update DB
      await supabase
        .from('weekly_stats')
        .update({ completed_hours: newCompleted, rating: newRating })
@@ -280,7 +291,6 @@ const App: React.FC = () => {
 
      setStats(prev => prev ? ({ ...prev, screenTimeHours: newScreenTime, rating: newRating }) : null);
 
-     // Update DB
      await supabase
        .from('weekly_stats')
        .update({ screen_time_hours: newScreenTime, rating: newRating })
@@ -293,7 +303,12 @@ const App: React.FC = () => {
   }
 
   if (isLoading || !stats) {
-    return <div className="min-h-screen bg-[#020617] flex items-center justify-center text-white">Loading your dashboard...</div>;
+    return <div className="min-h-screen bg-[#020617] flex items-center justify-center text-white">
+        <div className="flex flex-col items-center gap-4">
+            <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+            <p>Syncing verified tasks...</p>
+        </div>
+    </div>;
   }
 
   return (
