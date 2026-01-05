@@ -121,6 +121,7 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
         resetForm();
 
         // DB Insert
+        // IMPORTANT: We send createdAt as a number, not ISO string, to satisfy 'bigint' column type.
         const { data, error } = await supabase.from('tasks').insert({
             user_id: user.googleId,
             title: newTask.title,
@@ -128,7 +129,7 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
             type: newTask.type,
             duration_hours: newTask.durationHours,
             status: newTask.status,
-            created_at: new Date(newTask.createdAt).toISOString() // Ensure ISO string for DB
+            created_at: newTask.createdAt 
         }).select();
 
         // Update with real ID from DB if successful
@@ -138,7 +139,7 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
         if (error) {
             console.error("Error creating task", error);
             setTasks(prev => prev.filter(t => t.id !== tempId));
-            alert("Failed to save task to database.");
+            alert(`Failed to save task to database: ${error.message}`);
         }
     }
   };
@@ -216,7 +217,8 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
       
       setVerifyingId(null);
       
-      const completedAt = result.verified ? new Date().toISOString() : null;
+      // Use timestamp number for DB compatibility
+      const completedAt = result.verified ? Date.now() : null;
 
       await supabase.from('tasks').update({
         status: newStatus,
