@@ -25,6 +25,7 @@ export const History: React.FC<HistoryProps> = ({ history }) => {
     ? (history.reduce((acc, curr) => acc + curr.rating, 0) / history.length).toFixed(1) 
     : "0.0";
   
+  // 1. Sort history chronologically (Oldest -> Newest)
   const sortedHistory = [...history].sort((a, b) => a.weekId.localeCompare(b.weekId));
 
   const calculateBestStreak = (entries: HistoryEntry[]) => {
@@ -48,19 +49,25 @@ export const History: React.FC<HistoryProps> = ({ history }) => {
     : "0.0";
 
   // Pagination Logic (Cluster of 4 weeks)
-  // We want Page 0 to be the LATEST 4 weeks.
+  // Page 0 = The most recent cluster. Page increases as we go back in time.
   const CHUNK_SIZE = 4;
   const [page, setPage] = useState(0); 
   
-  // Reverse to slice from newest
-  const reversedHistory = [...sortedHistory].reverse();
-  const totalPages = Math.ceil(reversedHistory.length / CHUNK_SIZE) || 1;
+  const totalItems = sortedHistory.length;
+  const totalPages = Math.ceil(totalItems / CHUNK_SIZE) || 1;
 
-  // Get current chunk
-  const startIndex = page * CHUNK_SIZE;
-  const currentChunkRaw = reversedHistory.slice(startIndex, startIndex + CHUNK_SIZE);
-  // Re-reverse to chronological order for charts
-  const visibleHistory = [...currentChunkRaw].reverse();
+  // Calculate slice indices for chronological chunks
+  // We want the last chunk to be at the end of the array.
+  // Page 0: [Length-4, Length]
+  // Page 1: [Length-8, Length-4]
+  const endIndex = totalItems - (page * CHUNK_SIZE);
+  const startIndex = Math.max(0, endIndex - CHUNK_SIZE);
+  
+  // visibleHistory is in Old->New order for charts
+  const visibleHistory = sortedHistory.slice(startIndex, endIndex);
+
+  // tableHistory is in New->Old order for the list
+  const tableHistory = [...visibleHistory].reverse();
 
   const handleOlder = () => {
     if (page < totalPages - 1) setPage(p => p + 1);
@@ -211,8 +218,7 @@ export const History: React.FC<HistoryProps> = ({ history }) => {
                    </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
-                   {/* We display the current visible history slice here, reversed to show newest on top within the table */}
-                   {[...visibleHistory].reverse().map((entry) => (
+                   {tableHistory.map((entry) => (
                       <tr key={entry.id} className="hover:bg-slate-800/50 transition-colors">
                          <td className="px-6 py-4 text-slate-300 font-medium">{entry.weekId}</td>
                          <td className="px-6 py-4 text-slate-500 text-sm">{entry.startDate} - {entry.endDate}</td>
