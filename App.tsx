@@ -48,188 +48,213 @@ const App: React.FC = () => {
     setIsLoading(true);
     const currentWeekId = getCurrentWeekId();
 
-    // 0. Fetch User Profile to get goal
-    const { data: profile } = await supabase.from('profiles').select('*').eq('google_id', googleId).single();
-    if (profile && user) {
-       const updatedUser = { ...user, weeklyGoalHours: profile.weekly_goal_hours || 80 };
-       setUser(updatedUser);
-       localStorage.setItem('focusforge_user', JSON.stringify(updatedUser));
-    }
+    try {
+      // Parallel execution for faster load times
+      // We fetch everything at once instead of awaiting sequentially
+      const [profileRes, tasksRes, historyRes, currentStatsRes] = await Promise.all([
+        supabase.from('profiles').select('*').eq('google_id', googleId).single(),
+        supabase.from('tasks').select('*').eq('user_id', googleId).order('created_at', { ascending: false }),
+        supabase.from('weekly_stats').select('*').eq('user_id', googleId).neq('week_id', currentWeekId).order('week_id', { ascending: true }),
+        supabase.from('weekly_stats').select('*').eq('user_id', googleId).eq('week_id', currentWeekId).single()
+      ]);
 
-    // 1. Fetch Tasks FIRST to allow recalculation of stats
-    const { data: tasksData } = await supabase
-      .from('tasks')
-      .select('*')
-      .eq('user_id', googleId)
-      .order('created_at', { ascending: false });
-
-    let formattedTasks: Task[] = [];
-    if (tasksData) {
-      formattedTasks = tasksData.map((t: any) => ({
-        id: t.id,
-        title: t.title,
-        description: t.description,
-        type: t.type,
-        durationHours: t.duration_hours,
-        createdAt: t.created_at,
-        completedAt: t.completed_at,
-        status: t.status,
-        proofImage: t.proof_image,
-        rejectionReason: t.rejection_reason
-      }));
-      setTasks(formattedTasks);
-    }
-
-    // 2. Fetch History (Excluding current week)
-    const { data: historyData } = await supabase
-      .from('weekly_stats')
-      .select('*')
-      .eq('user_id', googleId)
-      .neq('week_id', currentWeekId)
-      .order('week_id', { ascending: true });
-
-    let calculatedStreak = 0;
-    
-    if (historyData) {
-      const formattedHistory: HistoryEntry[] = historyData.map((h: any) => ({
-        id: h.id,
-        weekId: h.week_id,
-        goalHours: h.goal_hours,
-        completedHours: h.completed_hours,
-        screenTimeHours: h.screen_time_hours,
-        rating: h.rating,
-        streakActive: h.streak_active,
-        startDate: h.start_date,
-        endDate: h.end_date
-      }));
-      setHistory(formattedHistory);
-
-      // Recalculate Streak
-      const reversedHistory = [...formattedHistory].sort((a, b) => b.weekId.localeCompare(a.weekId));
-      for (const entry of reversedHistory) {
-         if (entry.completedHours >= entry.goalHours) {
-           calculatedStreak++;
-         } else {
-           break; 
+      // 1. Process Profile
+      if (profileRes.data && user) {
+         // Only update if different to avoid flickering/unnecessary writes
+         const newGoal = profileRes.data.weekly_goal_hours || 80;
+         if (user.weeklyGoalHours !== newGoal) {
+             const updatedUser = { ...user, weeklyGoalHours: newGoal };
+             setUser(updatedUser);
+             localStorage.setItem('focusforge_user', JSON.stringify(updatedUser));
          }
       }
-    } else {
-      setHistory([]);
-    }
 
-    // Update User Streak
-    setUser((prev) => {
-        if (!prev) return null;
-        const updated = { ...prev, currentStreak: calculatedStreak };
-        localStorage.setItem('focusforge_user', JSON.stringify(updated));
-        return updated;
-    });
-
-    // 3. Fetch Current Week Stats or Create
-    const { data: currentStats } = await supabase
-      .from('weekly_stats')
-      .select('*')
-      .eq('user_id', googleId)
-      .eq('week_id', currentWeekId)
-      .single();
-
-    // Calculate actual completed hours for THIS week from Tasks
-    // This ensures that if the week switches, we don't accidentally show old data if the DB record was reused or malformed,
-    // and we self-heal any drift between tasks and stats.
-    const now = new Date();
-    const currentDay = now.getDay(); 
-    const distanceToMonday = currentDay === 0 ? 6 : currentDay - 1;
-    const monday = new Date(now);
-    monday.setDate(now.getDate() - distanceToMonday);
-    monday.setHours(0, 0, 0, 0);
-    const nextMonday = new Date(monday);
-    nextMonday.setDate(monday.getDate() + 7);
-
-    const actualCompletedHours = formattedTasks
-      .filter(t => {
-         if (t.status !== VerificationStatus.VERIFIED || !t.completedAt) return false;
-         const d = new Date(t.completedAt);
-         return d >= monday && d < nextMonday;
-      })
-      .reduce((acc, t) => acc + t.durationHours, 0);
-
-    if (currentStats) {
-      // Check if we need to self-heal
-      if (Math.abs(currentStats.completed_hours - actualCompletedHours) > 0.1) {
-          await supabase.from('weekly_stats')
-            .update({ completed_hours: actualCompletedHours })
-            .eq('week_id', currentWeekId)
-            .eq('user_id', googleId);
-          currentStats.completed_hours = actualCompletedHours;
+      // 2. Process Tasks
+      let formattedTasks: Task[] = [];
+      if (tasksRes.data) {
+        formattedTasks = tasksRes.data.map((t: any) => ({
+          id: t.id,
+          title: t.title,
+          description: t.description,
+          type: t.type,
+          durationHours: t.duration_hours,
+          createdAt: t.created_at,
+          completedAt: t.completed_at,
+          status: t.status,
+          proofImage: t.proof_image,
+          rejectionReason: t.rejection_reason
+        }));
+        setTasks(formattedTasks);
       }
 
-      setStats({
-        weekId: currentStats.week_id,
-        goalHours: currentStats.goal_hours,
-        completedHours: currentStats.completed_hours,
-        screenTimeHours: currentStats.screen_time_hours,
-        rating: currentStats.rating,
-        streakActive: currentStats.streak_active,
-        startDate: currentStats.start_date,
-        endDate: currentStats.end_date
-      });
-    } else {
-      // Create new week entry
-      const currentGoal = profile?.weekly_goal_hours || 80;
+      // 3. Process History
+      let calculatedStreak = 0;
+      if (historyRes.data) {
+        const formattedHistory: HistoryEntry[] = historyRes.data.map((h: any) => ({
+          id: h.id,
+          weekId: h.week_id,
+          goalHours: h.goal_hours,
+          completedHours: h.completed_hours,
+          screenTimeHours: h.screen_time_hours,
+          rating: h.rating,
+          streakActive: h.streak_active,
+          startDate: h.start_date,
+          endDate: h.end_date
+        }));
+        setHistory(formattedHistory);
 
-      const newStats: WeeklyStats = {
-        weekId: currentWeekId,
-        startDate: monday.toLocaleDateString(),
-        endDate: new Date(nextMonday.getTime() - 1).toLocaleDateString(),
-        goalHours: currentGoal,
-        completedHours: actualCompletedHours, // Initialize with what we found (usually 0 for new week)
-        screenTimeHours: 0,
-        rating: 0,
-        streakActive: true
-      };
+        // Recalculate Streak
+        const reversedHistory = [...formattedHistory].sort((a, b) => b.weekId.localeCompare(a.weekId));
+        for (const entry of reversedHistory) {
+           if (entry.completedHours >= entry.goalHours) {
+             calculatedStreak++;
+           } else {
+             break; 
+           }
+        }
+      } else {
+        setHistory([]);
+      }
 
-      const { error: insertError } = await supabase.from('weekly_stats').insert({
-        user_id: googleId,
-        week_id: newStats.weekId,
-        start_date: newStats.startDate,
-        end_date: newStats.endDate,
-        goal_hours: newStats.goalHours,
-        completed_hours: newStats.completedHours
-      });
+      // Update User Streak locally if needed
+      if (user && user.currentStreak !== calculatedStreak) {
+          setUser(prev => {
+              if (!prev) return null;
+              const updated = { ...prev, currentStreak: calculatedStreak };
+              localStorage.setItem('focusforge_user', JSON.stringify(updated));
+              return updated;
+          });
+      }
 
-      if (!insertError) setStats(newStats);
+      // 4. Process Current Stats & Self-Healing
+      // Calculate actual completed hours for THIS week from Tasks
+      const now = new Date();
+      const currentDay = now.getDay(); 
+      const distanceToMonday = currentDay === 0 ? 6 : currentDay - 1;
+      const monday = new Date(now);
+      monday.setDate(now.getDate() - distanceToMonday);
+      monday.setHours(0, 0, 0, 0);
+      const nextMonday = new Date(monday);
+      nextMonday.setDate(monday.getDate() + 7);
+
+      const actualCompletedHours = formattedTasks
+        .filter(t => {
+           if (t.status !== VerificationStatus.VERIFIED || !t.completedAt) return false;
+           const d = new Date(t.completedAt);
+           return d >= monday && d < nextMonday;
+        })
+        .reduce((acc, t) => acc + t.durationHours, 0);
+
+      const statsData = currentStatsRes.data;
+
+      if (statsData) {
+        // Prepare stats object
+        let statsToSet = {
+          weekId: statsData.week_id,
+          goalHours: statsData.goal_hours,
+          completedHours: statsData.completed_hours,
+          screenTimeHours: statsData.screen_time_hours,
+          rating: statsData.rating,
+          streakActive: statsData.streak_active,
+          startDate: statsData.start_date,
+          endDate: statsData.end_date
+        };
+
+        // Self-heal check (Optimistic UI update)
+        // If DB stats mismatch actual task logs, use the calculated value and sync DB in background
+        if (Math.abs(statsData.completed_hours - actualCompletedHours) > 0.1) {
+            statsToSet.completedHours = actualCompletedHours;
+            
+            // Background update - DO NOT AWAIT, prevents blocking UI
+            supabase.from('weekly_stats')
+              .update({ completed_hours: actualCompletedHours })
+              .eq('week_id', currentWeekId)
+              .eq('user_id', googleId)
+              .then(({ error }) => {
+                 if (error) console.error("Background stat sync failed", error);
+              });
+        }
+        setStats(statsToSet);
+      } else {
+        // Create new week entry (Optimistic UI)
+        const currentGoal = profileRes.data?.weekly_goal_hours || (user?.weeklyGoalHours || 80);
+
+        const newStats: WeeklyStats = {
+          weekId: currentWeekId,
+          startDate: monday.toLocaleDateString(),
+          endDate: new Date(nextMonday.getTime() - 1).toLocaleDateString(),
+          goalHours: currentGoal,
+          completedHours: actualCompletedHours,
+          screenTimeHours: 0,
+          rating: 0,
+          streakActive: true
+        };
+
+        setStats(newStats);
+
+        // Background Insert - DO NOT AWAIT
+        supabase.from('weekly_stats').insert({
+          user_id: googleId,
+          week_id: newStats.weekId,
+          start_date: newStats.startDate,
+          end_date: newStats.endDate,
+          goal_hours: newStats.goalHours,
+          completed_hours: newStats.completedHours
+        }).then(({ error }) => {
+            if (error) console.error("Error creating weekly stats", error);
+        });
+      }
+
+    } catch (err) {
+        console.error("Critical error fetching user data:", err);
+        // Ensure we stop loading even on error so user isn't stuck
+    } finally {
+        setIsLoading(false);
     }
-
-    setIsLoading(false);
   };
 
   const handleLogin = async (userData: any) => {
-    const { data: existingProfile } = await supabase.from('profiles').select('weekly_goal_hours').eq('google_id', userData.googleId).single();
-    const userGoal = existingProfile?.weekly_goal_hours || 80;
-
-    const { error } = await supabase.from('profiles').upsert({
-      google_id: userData.googleId,
-      email: userData.email,
-      name: userData.name,
-      avatar_url: userData.avatarUrl,
-      weekly_goal_hours: userGoal 
-    }, { onConflict: 'google_id' });
-
-    if (error) {
-      console.error("Supabase Login Error", error);
-    }
-
+    // Optimistic Login Handling
     const newUser: UserProfile = {
       name: userData.name,
       email: userData.email,
       avatarUrl: userData.avatarUrl,
       googleId: userData.googleId,
-      weeklyGoalHours: userGoal, 
+      weeklyGoalHours: 80, // Default until fetched
       currentStreak: 0 
     };
     setUser(newUser);
     localStorage.setItem('focusforge_user', JSON.stringify(newUser));
     setIsAuthenticated(true);
+    
+    // Fire off fetches
+    // We try to get existing profile first to honor user's goal settings
+    try {
+        const { data: existingProfile } = await supabase.from('profiles').select('weekly_goal_hours').eq('google_id', userData.googleId).single();
+        const userGoal = existingProfile?.weekly_goal_hours || 80;
+        
+        // Update user state with correct goal
+        if (userGoal !== 80) {
+            const refinedUser = { ...newUser, weeklyGoalHours: userGoal };
+            setUser(refinedUser);
+            localStorage.setItem('focusforge_user', JSON.stringify(refinedUser));
+        }
+
+        // Upsert profile in background
+        supabase.from('profiles').upsert({
+            google_id: userData.googleId,
+            email: userData.email,
+            name: userData.name,
+            avatar_url: userData.avatarUrl,
+            weekly_goal_hours: userGoal 
+        }, { onConflict: 'google_id' }).then(({ error }) => {
+             if (error) console.error("Supabase Profile Upsert Error", error);
+        });
+
+    } catch (e) {
+        console.error("Login process error", e);
+    }
+
     fetchUserData(userData.googleId);
   };
 

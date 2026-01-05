@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   ResponsiveContainer, 
   BarChart, 
@@ -19,14 +19,30 @@ interface HistoryProps {
 }
 
 export const History: React.FC<HistoryProps> = ({ history }) => {
-  // Lifetime Stats Calculation (All History)
-  const totalCompleted = history.reduce((acc, curr) => acc + curr.completedHours, 0);
-  const avgRating = history.length > 0 
-    ? (history.reduce((acc, curr) => acc + curr.rating, 0) / history.length).toFixed(1) 
-    : "0.0";
   
-  // 1. Sort history chronologically (Oldest -> Newest)
-  const sortedHistory = [...history].sort((a, b) => a.weekId.localeCompare(b.weekId));
+  // 1. Sort history chronologically (Oldest -> Newest) using robust numeric parsing
+  // This ensures '2024-W7' is treated correctly vs '2024-W10' (numeric 7 < 10, whereas string '7' > '1')
+  const sortedHistory = useMemo(() => {
+    return [...history].sort((a, b) => {
+      // Handle potential format variations, though App.tsx ensures padding
+      const partsA = a.weekId.split('-W');
+      const partsB = b.weekId.split('-W');
+      
+      const yearA = parseInt(partsA[0], 10);
+      const weekA = parseInt(partsA[1], 10);
+      const yearB = parseInt(partsB[0], 10);
+      const weekB = parseInt(partsB[1], 10);
+
+      if (yearA !== yearB) return yearA - yearB;
+      return weekA - weekB;
+    });
+  }, [history]);
+
+  // Lifetime Stats Calculation
+  const totalCompleted = sortedHistory.reduce((acc, curr) => acc + curr.completedHours, 0);
+  const avgRating = sortedHistory.length > 0 
+    ? (sortedHistory.reduce((acc, curr) => acc + curr.rating, 0) / sortedHistory.length).toFixed(1) 
+    : "0.0";
 
   const calculateBestStreak = (entries: HistoryEntry[]) => {
     let maxStreak = 0;
@@ -44,29 +60,27 @@ export const History: React.FC<HistoryProps> = ({ history }) => {
   };
 
   const bestStreak = calculateBestStreak(sortedHistory);
-  const avgScreenTime = history.length > 0 
-    ? (history.reduce((acc, curr) => acc + curr.screenTimeHours, 0) / history.length).toFixed(1) 
+  const avgScreenTime = sortedHistory.length > 0 
+    ? (sortedHistory.reduce((acc, curr) => acc + curr.screenTimeHours, 0) / sortedHistory.length).toFixed(1) 
     : "0.0";
 
   // Pagination Logic (Cluster of 4 weeks)
-  // Page 0 = The most recent cluster. Page increases as we go back in time.
   const CHUNK_SIZE = 4;
   const [page, setPage] = useState(0); 
   
   const totalItems = sortedHistory.length;
   const totalPages = Math.ceil(totalItems / CHUNK_SIZE) || 1;
 
-  // Calculate slice indices for chronological chunks
-  // We want the last chunk to be at the end of the array.
-  // Page 0: [Length-4, Length]
-  // Page 1: [Length-8, Length-4]
+  // Calculate slice indices
+  // We want the chunk to slide from the END of the array (Newest) backwards
+  // But within the chunk, preserve the order (Oldest -> Newest) for the graph (Left -> Right)
   const endIndex = totalItems - (page * CHUNK_SIZE);
   const startIndex = Math.max(0, endIndex - CHUNK_SIZE);
   
-  // visibleHistory is in Old->New order for charts
+  // visibleHistory contains [Oldest, ..., Newest] relative to the chunk window
   const visibleHistory = sortedHistory.slice(startIndex, endIndex);
 
-  // tableHistory is in New->Old order for the list
+  // Table typically shows Newest at top
   const tableHistory = [...visibleHistory].reverse();
 
   const handleOlder = () => {
@@ -88,7 +102,7 @@ export const History: React.FC<HistoryProps> = ({ history }) => {
           <p className="text-slate-400">Track your productivity trends and screen time over weeks.</p>
        </header>
 
-       {/* Summary Cards (Lifetime Stats) */}
+       {/* Summary Cards */}
        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="bg-slate-900 p-5 rounded-xl border border-slate-800">
              <div className="flex items-center gap-3 mb-2">
