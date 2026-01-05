@@ -55,6 +55,32 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
 
   const todayUsed = todayTasks.reduce((acc, t) => acc + t.durationHours, 0);
 
+  const formatTimeAgo = (timestamp: number | string) => {
+    if (!timestamp) return '';
+    const date = new Date(timestamp);
+    const now = new Date();
+    const seconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+
+    if (seconds < 60) return 'created just now';
+
+    const intervals = [
+        { label: 'year', seconds: 31536000 },
+        { label: 'month', seconds: 2592000 },
+        { label: 'week', seconds: 604800 },
+        { label: 'day', seconds: 86400 },
+        { label: 'hr', seconds: 3600 },
+        { label: 'min', seconds: 60 }
+    ];
+
+    for (const i of intervals) {
+        const count = Math.floor(seconds / i.seconds);
+        if (count >= 1) {
+            return `created ${count} ${i.label}${count !== 1 ? 's' : ''} ago`;
+        }
+    }
+    return 'created just now';
+  };
+
   const openCreateModal = () => {
     resetForm();
     setIsModalOpen(true);
@@ -284,13 +310,19 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
             )}
 
             <div className="flex-1">
-              <div className="flex items-center gap-2 mb-1">
+              <div className="flex items-center gap-2 mb-1 flex-wrap">
                 <span className={`text-xs px-2 py-0.5 rounded border ${task.type === TaskType.STUDY ? 'bg-indigo-950/50 border-indigo-900 text-indigo-400' : 'bg-teal-950/50 border-teal-900 text-teal-400'}`}>
                   {task.type}
                 </span>
                 <span className="text-xs text-slate-500 flex items-center gap-1">
                   <Icons.Clock className="w-3 h-3" /> {task.durationHours}h
                 </span>
+                
+                <span className="text-xs text-slate-600 hidden sm:inline">•</span>
+                <span className="text-xs text-slate-500">
+                  {formatTimeAgo(task.createdAt)}
+                </span>
+
                 {task.status === VerificationStatus.REJECTED && (
                     <span className="text-xs text-red-400 bg-red-950/30 px-2 rounded">Rejected: {task.rejectionReason}</span>
                 )}
