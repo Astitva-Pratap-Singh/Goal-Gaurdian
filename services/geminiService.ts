@@ -91,22 +91,24 @@ export const calculateWeeklyRating = async (
   goalHours: number,
   screenTimeHours: number
 ): Promise<number> => {
-    // Simple algorithm, but we could use AI to be "judgey" about it in v2
-    // For now, pure math as requested: 0.0 to 10.0
-    
     if (goalHours === 0) return 0;
 
+    // 1. Productivity Score (Base 0-10)
     const productivityScore = (completedHours / goalHours) * 10;
     
-    // Penalize screen time: if screen time > 2 hours/day (14/week), start deducting
-    const screenTimeThreshold = 14;
+    // 2. Screen Time Penalty
+    // Threshold: 21 hours/week (3 hours/day) is "acceptable".
+    const screenTimeThreshold = 21;
     let penalty = 0;
+    
     if (screenTimeHours > screenTimeThreshold) {
-        penalty = (screenTimeHours - screenTimeThreshold) * 0.5; // Lose 0.5 points per extra hour
+        // Penalty: Lose 0.15 points per hour over the limit
+        // Example: 60 hours total -> 39 hours over -> 5.85 point penalty.
+        penalty = (screenTimeHours - screenTimeThreshold) * 0.15;
     }
 
     let finalRating = productivityScore - penalty;
-    finalRating = Math.max(0, Math.min(10, finalRating)); // Clamp
+    finalRating = Math.max(0, Math.min(10, finalRating)); // Clamp between 0 and 10
 
     return parseFloat(finalRating.toFixed(1));
 };

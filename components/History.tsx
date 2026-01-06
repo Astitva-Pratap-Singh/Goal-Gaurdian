@@ -12,19 +12,19 @@ import {
   ReferenceLine
 } from 'recharts';
 import { Icons } from './Icons';
-import { HistoryEntry } from '../types';
+import { HistoryEntry, Task, TaskType } from '../types';
 
 interface HistoryProps {
   history: HistoryEntry[];
+  tasks: Task[];
 }
 
-export const History: React.FC<HistoryProps> = ({ history }) => {
-  
+export const History: React.FC<HistoryProps> = ({ history, tasks }) => {
+  const [expandedWeekId, setExpandedWeekId] = useState<string | null>(null);
+
   // 1. Sort history chronologically (Oldest -> Newest) using robust numeric parsing
-  // This ensures '2024-W7' is treated correctly vs '2024-W10' (numeric 7 < 10, whereas string '7' > '1')
   const sortedHistory = useMemo(() => {
     return [...history].sort((a, b) => {
-      // Handle potential format variations, though App.tsx ensures padding
       const partsA = a.weekId.split('-W');
       const partsB = b.weekId.split('-W');
       
@@ -71,16 +71,10 @@ export const History: React.FC<HistoryProps> = ({ history }) => {
   const totalItems = sortedHistory.length;
   const totalPages = Math.ceil(totalItems / CHUNK_SIZE) || 1;
 
-  // Calculate slice indices
-  // We want the chunk to slide from the END of the array (Newest) backwards
-  // But within the chunk, preserve the order (Oldest -> Newest) for the graph (Left -> Right)
   const endIndex = totalItems - (page * CHUNK_SIZE);
   const startIndex = Math.max(0, endIndex - CHUNK_SIZE);
   
-  // visibleHistory contains [Oldest, ..., Newest] relative to the chunk window
   const visibleHistory = sortedHistory.slice(startIndex, endIndex);
-
-  // Table typically shows Newest at top
   const tableHistory = [...visibleHistory].reverse();
 
   const handleOlder = () => {
@@ -89,6 +83,28 @@ export const History: React.FC<HistoryProps> = ({ history }) => {
 
   const handleNewer = () => {
     if (page > 0) setPage(p => p - 1);
+  };
+
+  const toggleWeekExpansion = (weekId: string) => {
+      setExpandedWeekId(prev => prev === weekId ? null : weekId);
+  };
+
+  // Helper to get tasks for a specific week entry
+  const getTasksForWeek = (entry: HistoryEntry) => {
+      // Create date objects for comparison
+      // Note: startDate string is strictly formatted YYYY-MM-DD or locale date string by App.tsx
+      // For safer comparison, we can rely on week logic or Date parsing.
+      // Since App.tsx creates stats based on timestamps, lets use timestamps.
+      // But we can also check if the completion date falls within the week range.
+      
+      const start = new Date(entry.startDate).getTime();
+      // Add 1 day (86400000) to end date to ensure we cover the full end day
+      const end = new Date(entry.endDate).getTime() + 86400000;
+
+      return tasks.filter(t => {
+          if (!t.completedAt) return false;
+          return t.completedAt >= start && t.completedAt < end;
+      });
   };
 
   const rangeLabel = visibleHistory.length > 0 
@@ -206,7 +222,7 @@ export const History: React.FC<HistoryProps> = ({ history }) => {
                       <Tooltip 
                          contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc' }}
                       />
-                      <ReferenceLine y={14} stroke="#ef4444" strokeDasharray="3 3" label={{ value: 'Limit', position: 'insideTopRight', fill: '#ef4444', fontSize: 10 }} />
+                      <ReferenceLine y={21} stroke="#ef4444" strokeDasharray="3 3" label={{ value: 'Limit', position: 'insideTopRight', fill: '#ef4444', fontSize: 10 }} />
                       <Area type="monotone" dataKey="screenTimeHours" stroke="#f43f5e" fill="#f43f5e" fillOpacity={0.2} strokeWidth={2} />
                    </AreaChart>
                 </ResponsiveContainer>
@@ -214,7 +230,7 @@ export const History: React.FC<HistoryProps> = ({ history }) => {
           </div>
        </div>
 
-       {/* History List (Paginated) */}
+       {/* History List (Paginated with Expandable Rows) */}
        <div className="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden">
           <div className="p-6 border-b border-slate-800 flex justify-between items-center">
              <h3 className="text-lg font-semibold text-white">Week Details</h3>
@@ -229,36 +245,75 @@ export const History: React.FC<HistoryProps> = ({ history }) => {
                       <th className="px-6 py-4 font-medium">Hours Completed</th>
                       <th className="px-6 py-4 font-medium">Screen Time</th>
                       <th className="px-6 py-4 font-medium">Rating</th>
+                      <th className="px-6 py-4 font-medium w-10"></th>
                    </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
                    {tableHistory.map((entry) => (
-                      <tr key={entry.id} className="hover:bg-slate-800/50 transition-colors">
-                         <td className="px-6 py-4 text-slate-300 font-medium">{entry.weekId}</td>
-                         <td className="px-6 py-4 text-slate-500 text-sm">{entry.startDate} - {entry.endDate}</td>
-                         <td className="px-6 py-4 text-slate-300">
-                            <span className={entry.completedHours >= entry.goalHours ? "text-green-400" : ""}>
-                               {entry.completedHours.toFixed(1)}
-                            </span>
-                            <span className="text-slate-600 text-xs"> / {entry.goalHours}h</span>
-                         </td>
-                         <td className="px-6 py-4 text-slate-300">
-                            <span className={entry.screenTimeHours > 14 ? "text-red-400" : "text-slate-300"}>
-                               {entry.screenTimeHours.toFixed(1)}h
-                            </span>
-                         </td>
-                         <td className="px-6 py-4">
-                            <div className="flex items-center gap-2">
-                               <span className={`font-bold ${entry.rating >= 7 ? 'text-green-400' : entry.rating >= 4 ? 'text-yellow-400' : 'text-red-400'}`}>
-                                  {entry.rating}
+                      <React.Fragment key={entry.id}>
+                          <tr 
+                            className={`transition-colors cursor-pointer ${expandedWeekId === entry.weekId ? 'bg-slate-800/80' : 'hover:bg-slate-800/50'}`}
+                            onClick={() => toggleWeekExpansion(entry.weekId)}
+                          >
+                             <td className="px-6 py-4 text-slate-300 font-medium">{entry.weekId}</td>
+                             <td className="px-6 py-4 text-slate-500 text-sm">{entry.startDate} - {entry.endDate}</td>
+                             <td className="px-6 py-4 text-slate-300">
+                                <span className={entry.completedHours >= entry.goalHours ? "text-green-400" : ""}>
+                                   {entry.completedHours.toFixed(1)}
                                 </span>
-                            </div>
-                         </td>
-                      </tr>
+                                <span className="text-slate-600 text-xs"> / {entry.goalHours}h</span>
+                             </td>
+                             <td className="px-6 py-4 text-slate-300">
+                                <span className={entry.screenTimeHours > 21 ? "text-red-400" : "text-slate-300"}>
+                                   {entry.screenTimeHours.toFixed(1)}h
+                                </span>
+                             </td>
+                             <td className="px-6 py-4">
+                                <div className="flex items-center gap-2">
+                                   <span className={`font-bold ${entry.rating >= 7 ? 'text-green-400' : entry.rating >= 4 ? 'text-yellow-400' : 'text-red-400'}`}>
+                                      {entry.rating}
+                                    </span>
+                                </div>
+                             </td>
+                             <td className="px-6 py-4 text-slate-500">
+                                {expandedWeekId === entry.weekId ? <Icons.ChevronLeft className="-rotate-90 w-4 h-4"/> : <Icons.ChevronLeft className="rotate-180 w-4 h-4"/>}
+                             </td>
+                          </tr>
+                          
+                          {/* Expanded Details Row */}
+                          {expandedWeekId === entry.weekId && (
+                             <tr className="bg-slate-950/50">
+                                <td colSpan={6} className="px-6 py-4">
+                                    <div className="space-y-3">
+                                        <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Completed Tasks</h4>
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                                            {getTasksForWeek(entry).length > 0 ? (
+                                                getTasksForWeek(entry).map(task => (
+                                                    <div key={task.id} className="bg-slate-900 border border-slate-800 rounded-lg p-3 flex items-start gap-3">
+                                                        <div className={`mt-1 w-2 h-2 rounded-full flex-shrink-0 ${task.type === TaskType.STUDY ? 'bg-indigo-500' : 'bg-teal-500'}`}></div>
+                                                        <div className="overflow-hidden">
+                                                            <p className="text-slate-200 text-sm font-medium truncate" title={task.title}>{task.title}</p>
+                                                            <div className="flex items-center gap-2 text-xs text-slate-500 mt-1">
+                                                                <span className="flex items-center gap-1"><Icons.Clock className="w-3 h-3"/> {task.durationHours}h</span>
+                                                                <span>•</span>
+                                                                <span>{new Date(task.completedAt!).toLocaleDateString()}</span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ))
+                                            ) : (
+                                                <p className="text-sm text-slate-500 italic col-span-3">No tasks found for this period.</p>
+                                            )}
+                                        </div>
+                                    </div>
+                                </td>
+                             </tr>
+                          )}
+                      </React.Fragment>
                    ))}
                    {visibleHistory.length === 0 && (
                       <tr>
-                         <td colSpan={5} className="px-6 py-8 text-center text-slate-500">
+                         <td colSpan={6} className="px-6 py-8 text-center text-slate-500">
                             No history data available for this period.
                          </td>
                       </tr>

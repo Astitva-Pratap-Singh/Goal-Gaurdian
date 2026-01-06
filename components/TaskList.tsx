@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import { Icons } from './Icons';
 import { Task, TaskType, VerificationStatus, UserProfile } from '../types';
 import { verifyTaskProof } from '../services/geminiService';
@@ -31,28 +31,35 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
 
   // Daily Limit Calculation
   const dailyLimit = user.weeklyGoalHours / 7;
+
+  // --- MOTIVATIONAL QUOTES FOR EMPTY STATE ---
+  const quotes = [
+      { text: "Discipline is doing what needs to be done, even if you don't want to.", icon: Icons.Target, color: "text-red-400" },
+      { text: "Flow state is the ultimate high. Build the walls to protect it.", icon: Icons.Fire, color: "text-orange-400" },
+      { text: "Hard work beats talent when talent doesn't work hard.", icon: Icons.BarChart, color: "text-indigo-400" },
+      { text: "Consistency is the key to breakthrough. Show up.", icon: Icons.Clock, color: "text-teal-400" },
+      { text: "Your future is created by what you do today, not tomorrow.", icon: Icons.Layout, color: "text-slate-400" }
+  ];
+
+  const randomQuote = useMemo(() => {
+      return quotes[Math.floor(Math.random() * quotes.length)];
+  }, []); // Only run once on mount
+
+  // --- FILTER TASKS FOR "DAILY VIEW" ---
+  // Show task if: Created TODAY OR Completed TODAY
+  const visibleTasks = useMemo(() => {
+    const todayStr = new Date().toDateString();
+    return tasks.filter(t => {
+        const createdToday = new Date(t.createdAt).toDateString() === todayStr;
+        const completedToday = t.completedAt ? new Date(t.completedAt).toDateString() === todayStr : false;
+        
+        // We show tasks created today (even if pending) OR tasks completed today
+        return createdToday || completedToday;
+    });
+  }, [tasks]);
   
-  // Calculate today's load:
-  // 1. Tasks COMPLETED today (Verified with today's timestamp) - Counts as work done today.
-  // 2. Tasks CREATED today that are still PENDING/VERIFYING - Counts as work planned for today.
-  // Rejected tasks are excluded.
-  const todayTasks = tasks.filter(t => {
-      if (t.status === VerificationStatus.REJECTED) return false;
-
-      const now = new Date();
-      const todayString = now.toDateString();
-
-      // If verified, check completion date
-      if (t.status === VerificationStatus.VERIFIED && t.completedAt) {
-          const completedDate = new Date(t.completedAt);
-          return completedDate.toDateString() === todayString;
-      }
-
-      // If pending/verifying, check creation date
-      const createdDate = new Date(t.createdAt);
-      return createdDate.toDateString() === todayString;
-  });
-
+  // Calculate today's load based on the visible daily tasks
+  const todayTasks = visibleTasks.filter(t => t.status !== VerificationStatus.REJECTED);
   const todayUsed = todayTasks.reduce((acc, t) => acc + t.durationHours, 0);
 
   const formatTimeAgo = (timestamp: number | string) => {
@@ -150,7 +157,6 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
         resetForm();
 
         // DB Insert
-        // IMPORTANT: We send createdAt as a number, not ISO string, to satisfy 'bigint' column type.
         const { data, error } = await supabase.from('tasks').insert({
             user_id: user.googleId,
             title: newTask.title,
@@ -274,7 +280,7 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
     <div className="pb-20 md:pb-0 h-full overflow-y-auto">
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h2 className="text-2xl font-bold text-white">Tasks</h2>
+          <h2 className="text-2xl font-bold text-white">Today's Tasks</h2>
           <p className="text-slate-400 text-sm">
              Today's Load: <span className={`${todayUsed > dailyLimit ? 'text-red-400' : 'text-indigo-400'}`}>{todayUsed.toFixed(1)}h</span> / {dailyLimit.toFixed(1)}h limit
           </p>
@@ -289,14 +295,17 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
       </div>
 
       <div className="space-y-4">
-        {tasks.length === 0 && (
-            <div className="text-center py-20 text-slate-500">
-                <Icons.CheckCircle className="w-16 h-16 mx-auto mb-4 opacity-20" />
-                <p>No tasks yet. Start forging your week!</p>
+        {visibleTasks.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-20 text-center animate-in fade-in zoom-in-95 duration-500">
+                <randomQuote.icon className={`w-20 h-20 mb-6 ${randomQuote.color} opacity-80`} />
+                <h3 className="text-xl font-medium text-white max-w-lg leading-relaxed">
+                  "{randomQuote.text}"
+                </h3>
+                <p className="text-slate-600 mt-4 text-sm">Start your day by adding a new task.</p>
             </div>
         )}
 
-        {tasks.map(task => (
+        {visibleTasks.map(task => (
           <div key={task.id} className={`bg-slate-900 border ${task.status === VerificationStatus.VERIFIED ? 'border-green-900/50 bg-green-900/5' : task.status === VerificationStatus.REJECTED ? 'border-red-900/50' : 'border-slate-800'} rounded-xl p-5 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 transition-all hover:border-slate-700 group relative`}>
             
             {task.status !== VerificationStatus.VERIFIED && task.status !== VerificationStatus.VERIFYING && (
