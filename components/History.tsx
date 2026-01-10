@@ -117,37 +117,7 @@ export const History: React.FC<HistoryProps> = ({ history, tasks }) => {
       });
   };
 
-  // Helper for Left Chart (Daily Focus Trends: Study vs Work)
-  const getDailyFocusData = (entry: HistoryEntry) => {
-    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    const data = days.map(day => ({
-        day,
-        study: 0,
-        work: 0
-    }));
-
-    const weekTasks = getTasksForWeek(entry);
-    
-    weekTasks.forEach(task => {
-        if (!task.completedAt) return;
-        const date = new Date(task.completedAt);
-        // Adjust for Monday start (0=Mon, ... 6=Sun)
-        let dayIndex = date.getDay() - 1;
-        if (dayIndex === -1) dayIndex = 6;
-        
-        if (data[dayIndex]) {
-            if (task.type === TaskType.STUDY) {
-                data[dayIndex].study += task.durationHours;
-            } else {
-                data[dayIndex].work += task.durationHours;
-            }
-        }
-    });
-
-    return data;
-  };
-
-  // Helper for Right Chart (Daily Activity Trends: Productivity vs Screen Time)
+  // Helper for Daily Activity Trends: Productivity vs Screen Time
   const getDailyTrendData = (entry: HistoryEntry) => {
     const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     // Use average screen time (Total / 7) as we don't have daily storage yet
@@ -355,88 +325,46 @@ export const History: React.FC<HistoryProps> = ({ history, tasks }) => {
                                 <td colSpan={6} className="px-6 py-6 border-t border-b border-slate-800">
                                     <div className="flex flex-col gap-6">
                                         
-                                        {/* ROW 1: Charts (Side by Side) */}
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                            
-                                            {/* Left: Focus Distribution (Line) */}
-                                            <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-                                                <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4 flex items-center gap-2">
-                                                    <Icons.Target className="w-4 h-4" /> Daily Focus Breakdown
-                                                </h4>
-                                                <div className="h-64">
-                                                    <ResponsiveContainer width="100%" height="100%">
-                                                        <LineChart data={getDailyFocusData(entry)}>
-                                                            <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                                                            <XAxis dataKey="day" stroke="#475569" fontSize={12} tickLine={false} axisLine={false} />
-                                                            <YAxis stroke="#475569" fontSize={12} tickLine={false} axisLine={false} />
-                                                            <Tooltip 
-                                                                cursor={{stroke: '#334155'}} 
-                                                                contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc' }}
-                                                                formatter={(value: number) => [`${value.toFixed(1)} hrs`]}
-                                                            />
-                                                            <Legend />
-                                                            <Line 
-                                                                type="monotone" 
-                                                                dataKey="study" 
-                                                                name="Study" 
-                                                                stroke="#818cf8" 
-                                                                strokeWidth={3} 
-                                                                dot={{ fill: '#818cf8', r: 4 }} 
-                                                            />
-                                                            <Line 
-                                                                type="monotone" 
-                                                                dataKey="work" 
-                                                                name="Work" 
-                                                                stroke="#2dd4bf" 
-                                                                strokeWidth={3} 
-                                                                dot={{ fill: '#2dd4bf', r: 4 }} 
-                                                            />
-                                                        </LineChart>
-                                                    </ResponsiveContainer>
-                                                </div>
-                                            </div>
-
-                                            {/* Right: Daily Trends (Line Chart) */}
-                                            <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-                                                <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4 flex items-center gap-2">
-                                                    <Icons.BarChart className="w-4 h-4" /> Daily Activity Trends
-                                                </h4>
-                                                <div className="h-64">
-                                                    <ResponsiveContainer width="100%" height="100%">
-                                                        <LineChart data={getDailyTrendData(entry)}>
-                                                            <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                                                            <XAxis dataKey="day" stroke="#475569" fontSize={12} tickLine={false} axisLine={false} />
-                                                            <YAxis stroke="#475569" fontSize={12} tickLine={false} axisLine={false} />
-                                                            <Tooltip 
-                                                                cursor={{stroke: '#334155'}} 
-                                                                contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc' }}
-                                                                formatter={(value: number) => [`${value.toFixed(1)} hrs`]}
-                                                            />
-                                                            <Legend />
-                                                            <Line 
-                                                                type="monotone" 
-                                                                dataKey="productivity" 
-                                                                name="Productivity" 
-                                                                stroke="#818cf8" 
-                                                                strokeWidth={3} 
-                                                                dot={{ fill: '#818cf8', r: 4 }} 
-                                                            />
-                                                            <Line 
-                                                                type="monotone" 
-                                                                dataKey="screentime" 
-                                                                name="Screen Time (Avg)" 
-                                                                stroke="#f43f5e" 
-                                                                strokeWidth={3} 
-                                                                strokeDasharray="5 5"
-                                                                dot={false} 
-                                                            />
-                                                        </LineChart>
-                                                    </ResponsiveContainer>
-                                                </div>
+                                        {/* Chart: Daily Activity Trends (Full Width) */}
+                                        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                                            <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4 flex items-center gap-2">
+                                                <Icons.BarChart className="w-4 h-4" /> Daily Activity Trends
+                                            </h4>
+                                            <div className="h-64">
+                                                <ResponsiveContainer width="100%" height="100%">
+                                                    <LineChart data={getDailyTrendData(entry)}>
+                                                        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                                                        <XAxis dataKey="day" stroke="#475569" fontSize={12} tickLine={false} axisLine={false} />
+                                                        <YAxis stroke="#475569" fontSize={12} tickLine={false} axisLine={false} />
+                                                        <Tooltip 
+                                                            cursor={{stroke: '#334155'}} 
+                                                            contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc' }}
+                                                            formatter={(value: number) => [`${value.toFixed(1)} hrs`]}
+                                                        />
+                                                        <Legend />
+                                                        <Line 
+                                                            type="monotone" 
+                                                            dataKey="productivity" 
+                                                            name="Productivity" 
+                                                            stroke="#818cf8" 
+                                                            strokeWidth={3} 
+                                                            dot={{ fill: '#818cf8', r: 4 }} 
+                                                        />
+                                                        <Line 
+                                                            type="monotone" 
+                                                            dataKey="screentime" 
+                                                            name="Screen Time (Avg)" 
+                                                            stroke="#f43f5e" 
+                                                            strokeWidth={3} 
+                                                            strokeDasharray="5 5"
+                                                            dot={false} 
+                                                        />
+                                                    </LineChart>
+                                                </ResponsiveContainer>
                                             </div>
                                         </div>
 
-                                        {/* ROW 2: Task List (Full Width) */}
+                                        {/* Task List (Full Width) */}
                                         <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
                                             <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4 flex items-center gap-2">
                                                 <Icons.CheckCircle className="w-4 h-4" /> Completed Tasks
