@@ -20,6 +20,19 @@ interface HistoryProps {
   tasks: Task[];
 }
 
+// Helper to calculate ISO Week ID (Matches App.tsx logic)
+const getWeekIdFromTimestamp = (timestamp: number) => {
+  const d = new Date(timestamp);
+  d.setHours(0, 0, 0, 0);
+  // Set to nearest Thursday: current date + 4 - current day number
+  // Make Sunday's day number 7
+  d.setDate(d.getDate() + 4 - (d.getDay() || 7));
+  const yearStart = new Date(d.getFullYear(), 0, 1);
+  // Calculate full weeks to nearest Thursday
+  const weekNo = Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  return `${d.getFullYear()}-W${String(weekNo).padStart(2, '0')}`;
+};
+
 export const History: React.FC<HistoryProps> = ({ history, tasks }) => {
   const [expandedWeekId, setExpandedWeekId] = useState<string | null>(null);
 
@@ -92,13 +105,10 @@ export const History: React.FC<HistoryProps> = ({ history, tasks }) => {
 
   // Helper to get tasks for a specific week entry
   const getTasksForWeek = (entry: HistoryEntry) => {
-      const start = new Date(entry.startDate).getTime();
-      // Add 1 day (86400000) to end date to ensure we cover the full end day
-      const end = new Date(entry.endDate).getTime() + 86400000;
-
       return tasks.filter(t => {
           if (!t.completedAt) return false;
-          return t.completedAt >= start && t.completedAt < end;
+          // Use robust ID matching instead of fragile Date string parsing
+          return getWeekIdFromTimestamp(t.completedAt) === entry.weekId;
       });
   };
 
