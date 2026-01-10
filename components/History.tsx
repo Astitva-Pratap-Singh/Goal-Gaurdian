@@ -13,7 +13,9 @@ import {
   Cell,
   PieChart,
   Pie,
-  Legend
+  Legend,
+  LineChart,
+  Line
 } from 'recharts';
 import { Icons } from './Icons';
 import { HistoryEntry, Task, TaskType } from '../types';
@@ -115,30 +117,47 @@ export const History: React.FC<HistoryProps> = ({ history, tasks }) => {
       });
   };
 
-  const getWeekBarData = (entry: HistoryEntry) => {
-    const weekTasks = getTasksForWeek(entry);
-    const studyHours = weekTasks.filter(t => t.type === TaskType.STUDY).reduce((acc, t) => acc + t.durationHours, 0);
-    const workHours = weekTasks.filter(t => t.type === TaskType.WORK).reduce((acc, t) => acc + t.durationHours, 0);
-
-    return [
-      { name: 'Study', value: studyHours, color: '#818cf8' },
-      { name: 'Work', value: workHours, color: '#2dd4bf' },
-      { name: 'Screen Time', value: entry.screenTimeHours, color: '#f43f5e' }
-    ];
-  };
-
+  // Helper for Pie Chart (Focus)
   const getFocusPieData = (entry: HistoryEntry) => {
     const weekTasks = getTasksForWeek(entry);
     const studyHours = weekTasks.filter(t => t.type === TaskType.STUDY).reduce((acc, t) => acc + t.durationHours, 0);
     const workHours = weekTasks.filter(t => t.type === TaskType.WORK).reduce((acc, t) => acc + t.durationHours, 0);
     
-    // Avoid division by zero issues in charts by ensuring at least one data point if both are 0
     if (studyHours === 0 && workHours === 0) return [];
 
     return [
         { name: 'Study', value: studyHours, color: '#818cf8' },
         { name: 'Work', value: workHours, color: '#2dd4bf' }
     ];
+  };
+
+  // Helper for Line Chart (Daily Trends)
+  const getDailyTrendData = (entry: HistoryEntry) => {
+    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    // Use average screen time (Total / 7) as we don't have daily storage yet
+    const avgDailyScreenTime = parseFloat((entry.screenTimeHours / 7).toFixed(1));
+    
+    const data = days.map(day => ({
+        day,
+        productivity: 0,
+        screentime: avgDailyScreenTime
+    }));
+
+    const weekTasks = getTasksForWeek(entry);
+    
+    weekTasks.forEach(task => {
+        if (!task.completedAt) return;
+        const date = new Date(task.completedAt);
+        // Adjust for Monday start (0=Mon, ... 6=Sun)
+        let dayIndex = date.getDay() - 1;
+        if (dayIndex === -1) dayIndex = 6;
+        
+        if (data[dayIndex]) {
+            data[dayIndex].productivity += task.durationHours;
+        }
+    });
+
+    return data;
   };
 
   const rangeLabel = visibleHistory.length > 0 
@@ -322,33 +341,8 @@ export const History: React.FC<HistoryProps> = ({ history, tasks }) => {
                                         
                                         {/* ROW 1: Charts (Side by Side) */}
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                            {/* Chart 1: Activity Breakdown (Bar) */}
-                                            <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-                                                <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4 flex items-center gap-2">
-                                                    <Icons.BarChart className="w-4 h-4" /> Activity Volume
-                                                </h4>
-                                                <div className="h-64">
-                                                    <ResponsiveContainer width="100%" height="100%">
-                                                        <BarChart data={getWeekBarData(entry)}>
-                                                            <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                                                            <XAxis dataKey="name" stroke="#475569" fontSize={12} tickLine={false} axisLine={false} />
-                                                            <YAxis stroke="#475569" fontSize={12} tickLine={false} axisLine={false} />
-                                                            <Tooltip 
-                                                                cursor={{fill: '#1e293b'}} 
-                                                                contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc' }}
-                                                                formatter={(value: number) => [`${value.toFixed(1)} hrs`]}
-                                                            />
-                                                            <Bar dataKey="value" radius={[4, 4, 0, 0]}>
-                                                                {getWeekBarData(entry).map((d, index) => (
-                                                                    <Cell key={`cell-${index}`} fill={d.color} />
-                                                                ))}
-                                                            </Bar>
-                                                        </BarChart>
-                                                    </ResponsiveContainer>
-                                                </div>
-                                            </div>
-
-                                            {/* Chart 2: Focus Distribution (Pie) */}
+                                            
+                                            {/* Left: Focus Distribution (Pie) - Swapped Position */}
                                             <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
                                                 <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4 flex items-center gap-2">
                                                     <Icons.Target className="w-4 h-4" /> Focus Distribution
@@ -380,6 +374,45 @@ export const History: React.FC<HistoryProps> = ({ history, tasks }) => {
                                                     ) : (
                                                         <div className="text-slate-500 text-sm italic">No productivity data recorded.</div>
                                                     )}
+                                                </div>
+                                            </div>
+
+                                            {/* Right: Daily Trends (Line Chart) - Swapped & Converted */}
+                                            <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                                                <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4 flex items-center gap-2">
+                                                    <Icons.BarChart className="w-4 h-4" /> Daily Activity Trends
+                                                </h4>
+                                                <div className="h-64">
+                                                    <ResponsiveContainer width="100%" height="100%">
+                                                        <LineChart data={getDailyTrendData(entry)}>
+                                                            <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                                                            <XAxis dataKey="day" stroke="#475569" fontSize={12} tickLine={false} axisLine={false} />
+                                                            <YAxis stroke="#475569" fontSize={12} tickLine={false} axisLine={false} />
+                                                            <Tooltip 
+                                                                cursor={{stroke: '#334155'}} 
+                                                                contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc' }}
+                                                                formatter={(value: number) => [`${value.toFixed(1)} hrs`]}
+                                                            />
+                                                            <Legend />
+                                                            <Line 
+                                                                type="monotone" 
+                                                                dataKey="productivity" 
+                                                                name="Productivity" 
+                                                                stroke="#818cf8" 
+                                                                strokeWidth={3} 
+                                                                dot={{ fill: '#818cf8', r: 4 }} 
+                                                            />
+                                                            <Line 
+                                                                type="monotone" 
+                                                                dataKey="screentime" 
+                                                                name="Screen Time (Avg)" 
+                                                                stroke="#f43f5e" 
+                                                                strokeWidth={3} 
+                                                                strokeDasharray="5 5"
+                                                                dot={false} 
+                                                            />
+                                                        </LineChart>
+                                                    </ResponsiveContainer>
                                                 </div>
                                             </div>
                                         </div>
