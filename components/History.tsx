@@ -117,21 +117,37 @@ export const History: React.FC<HistoryProps> = ({ history, tasks }) => {
       });
   };
 
-  // Helper for Pie Chart (Focus)
-  const getFocusPieData = (entry: HistoryEntry) => {
-    const weekTasks = getTasksForWeek(entry);
-    const studyHours = weekTasks.filter(t => t.type === TaskType.STUDY).reduce((acc, t) => acc + t.durationHours, 0);
-    const workHours = weekTasks.filter(t => t.type === TaskType.WORK).reduce((acc, t) => acc + t.durationHours, 0);
-    
-    if (studyHours === 0 && workHours === 0) return [];
+  // Helper for Left Chart (Daily Focus Trends: Study vs Work)
+  const getDailyFocusData = (entry: HistoryEntry) => {
+    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    const data = days.map(day => ({
+        day,
+        study: 0,
+        work: 0
+    }));
 
-    return [
-        { name: 'Study', value: studyHours, color: '#818cf8' },
-        { name: 'Work', value: workHours, color: '#2dd4bf' }
-    ];
+    const weekTasks = getTasksForWeek(entry);
+    
+    weekTasks.forEach(task => {
+        if (!task.completedAt) return;
+        const date = new Date(task.completedAt);
+        // Adjust for Monday start (0=Mon, ... 6=Sun)
+        let dayIndex = date.getDay() - 1;
+        if (dayIndex === -1) dayIndex = 6;
+        
+        if (data[dayIndex]) {
+            if (task.type === TaskType.STUDY) {
+                data[dayIndex].study += task.durationHours;
+            } else {
+                data[dayIndex].work += task.durationHours;
+            }
+        }
+    });
+
+    return data;
   };
 
-  // Helper for Line Chart (Daily Trends)
+  // Helper for Right Chart (Daily Activity Trends: Productivity vs Screen Time)
   const getDailyTrendData = (entry: HistoryEntry) => {
     const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     // Use average screen time (Total / 7) as we don't have daily storage yet
@@ -342,42 +358,45 @@ export const History: React.FC<HistoryProps> = ({ history, tasks }) => {
                                         {/* ROW 1: Charts (Side by Side) */}
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                             
-                                            {/* Left: Focus Distribution (Pie) - Swapped Position */}
+                                            {/* Left: Focus Distribution (Line) */}
                                             <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
                                                 <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4 flex items-center gap-2">
-                                                    <Icons.Target className="w-4 h-4" /> Focus Distribution
+                                                    <Icons.Target className="w-4 h-4" /> Daily Focus Breakdown
                                                 </h4>
-                                                <div className="h-64 flex items-center justify-center">
-                                                    {getFocusPieData(entry).length > 0 ? (
-                                                        <ResponsiveContainer width="100%" height="100%">
-                                                            <PieChart>
-                                                                <Pie
-                                                                    data={getFocusPieData(entry)}
-                                                                    cx="50%"
-                                                                    cy="50%"
-                                                                    innerRadius={60}
-                                                                    outerRadius={80}
-                                                                    paddingAngle={5}
-                                                                    dataKey="value"
-                                                                >
-                                                                    {getFocusPieData(entry).map((entry, index) => (
-                                                                        <Cell key={`cell-${index}`} fill={entry.color} />
-                                                                    ))}
-                                                                </Pie>
-                                                                <Tooltip 
-                                                                    contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc' }}
-                                                                    formatter={(value: number) => [`${value.toFixed(1)} hrs`]}
-                                                                />
-                                                                <Legend verticalAlign="bottom" height={36}/>
-                                                            </PieChart>
-                                                        </ResponsiveContainer>
-                                                    ) : (
-                                                        <div className="text-slate-500 text-sm italic">No productivity data recorded.</div>
-                                                    )}
+                                                <div className="h-64">
+                                                    <ResponsiveContainer width="100%" height="100%">
+                                                        <LineChart data={getDailyFocusData(entry)}>
+                                                            <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                                                            <XAxis dataKey="day" stroke="#475569" fontSize={12} tickLine={false} axisLine={false} />
+                                                            <YAxis stroke="#475569" fontSize={12} tickLine={false} axisLine={false} />
+                                                            <Tooltip 
+                                                                cursor={{stroke: '#334155'}} 
+                                                                contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc' }}
+                                                                formatter={(value: number) => [`${value.toFixed(1)} hrs`]}
+                                                            />
+                                                            <Legend />
+                                                            <Line 
+                                                                type="monotone" 
+                                                                dataKey="study" 
+                                                                name="Study" 
+                                                                stroke="#818cf8" 
+                                                                strokeWidth={3} 
+                                                                dot={{ fill: '#818cf8', r: 4 }} 
+                                                            />
+                                                            <Line 
+                                                                type="monotone" 
+                                                                dataKey="work" 
+                                                                name="Work" 
+                                                                stroke="#2dd4bf" 
+                                                                strokeWidth={3} 
+                                                                dot={{ fill: '#2dd4bf', r: 4 }} 
+                                                            />
+                                                        </LineChart>
+                                                    </ResponsiveContainer>
                                                 </div>
                                             </div>
 
-                                            {/* Right: Daily Trends (Line Chart) - Swapped & Converted */}
+                                            {/* Right: Daily Trends (Line Chart) */}
                                             <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
                                                 <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4 flex items-center gap-2">
                                                     <Icons.BarChart className="w-4 h-4" /> Daily Activity Trends
