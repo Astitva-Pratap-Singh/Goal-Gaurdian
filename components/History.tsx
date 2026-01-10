@@ -10,7 +10,10 @@ import {
   AreaChart,
   Area,
   ReferenceLine,
-  Cell
+  Cell,
+  PieChart,
+  Pie,
+  Legend
 } from 'recharts';
 import { Icons } from './Icons';
 import { HistoryEntry, Task, TaskType } from '../types';
@@ -112,7 +115,7 @@ export const History: React.FC<HistoryProps> = ({ history, tasks }) => {
       });
   };
 
-  const getWeekChartData = (entry: HistoryEntry) => {
+  const getWeekBarData = (entry: HistoryEntry) => {
     const weekTasks = getTasksForWeek(entry);
     const studyHours = weekTasks.filter(t => t.type === TaskType.STUDY).reduce((acc, t) => acc + t.durationHours, 0);
     const workHours = weekTasks.filter(t => t.type === TaskType.WORK).reduce((acc, t) => acc + t.durationHours, 0);
@@ -121,6 +124,20 @@ export const History: React.FC<HistoryProps> = ({ history, tasks }) => {
       { name: 'Study', value: studyHours, color: '#818cf8' },
       { name: 'Work', value: workHours, color: '#2dd4bf' },
       { name: 'Screen Time', value: entry.screenTimeHours, color: '#f43f5e' }
+    ];
+  };
+
+  const getFocusPieData = (entry: HistoryEntry) => {
+    const weekTasks = getTasksForWeek(entry);
+    const studyHours = weekTasks.filter(t => t.type === TaskType.STUDY).reduce((acc, t) => acc + t.durationHours, 0);
+    const workHours = weekTasks.filter(t => t.type === TaskType.WORK).reduce((acc, t) => acc + t.durationHours, 0);
+    
+    // Avoid division by zero issues in charts by ensuring at least one data point if both are 0
+    if (studyHours === 0 && workHours === 0) return [];
+
+    return [
+        { name: 'Study', value: studyHours, color: '#818cf8' },
+        { name: 'Work', value: workHours, color: '#2dd4bf' }
     ];
   };
 
@@ -301,43 +318,81 @@ export const History: React.FC<HistoryProps> = ({ history, tasks }) => {
                           {expandedWeekId === entry.weekId && (
                              <tr className="bg-slate-950/30">
                                 <td colSpan={6} className="px-6 py-6 border-t border-b border-slate-800">
-                                    <div className="flex flex-col xl:flex-row gap-8">
+                                    <div className="flex flex-col gap-6">
                                         
-                                        {/* Left: Productivity Chart */}
-                                        <div className="flex-1 min-w-[300px] xl:max-w-md">
-                                            <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4 flex items-center gap-2">
-                                                <Icons.BarChart className="w-4 h-4" /> Activity Analysis
-                                            </h4>
-                                            <div className="h-64 bg-slate-900 border border-slate-800 rounded-xl p-4">
-                                                <ResponsiveContainer width="100%" height="100%">
-                                                    <BarChart data={getWeekChartData(entry)}>
-                                                        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                                                        <XAxis dataKey="name" stroke="#475569" fontSize={12} tickLine={false} axisLine={false} />
-                                                        <YAxis stroke="#475569" fontSize={12} tickLine={false} axisLine={false} />
-                                                        <Tooltip 
-                                                            cursor={{fill: '#1e293b'}} 
-                                                            contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc' }}
-                                                            formatter={(value: number) => [`${value.toFixed(1)} hrs`]}
-                                                        />
-                                                        <Bar dataKey="value" radius={[4, 4, 0, 0]}>
-                                                            {getWeekChartData(entry).map((d, index) => (
-                                                                <Cell key={`cell-${index}`} fill={d.color} />
-                                                            ))}
-                                                        </Bar>
-                                                    </BarChart>
-                                                </ResponsiveContainer>
+                                        {/* ROW 1: Charts (Side by Side) */}
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                            {/* Chart 1: Activity Breakdown (Bar) */}
+                                            <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                                                <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4 flex items-center gap-2">
+                                                    <Icons.BarChart className="w-4 h-4" /> Activity Volume
+                                                </h4>
+                                                <div className="h-64">
+                                                    <ResponsiveContainer width="100%" height="100%">
+                                                        <BarChart data={getWeekBarData(entry)}>
+                                                            <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                                                            <XAxis dataKey="name" stroke="#475569" fontSize={12} tickLine={false} axisLine={false} />
+                                                            <YAxis stroke="#475569" fontSize={12} tickLine={false} axisLine={false} />
+                                                            <Tooltip 
+                                                                cursor={{fill: '#1e293b'}} 
+                                                                contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc' }}
+                                                                formatter={(value: number) => [`${value.toFixed(1)} hrs`]}
+                                                            />
+                                                            <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                                                                {getWeekBarData(entry).map((d, index) => (
+                                                                    <Cell key={`cell-${index}`} fill={d.color} />
+                                                                ))}
+                                                            </Bar>
+                                                        </BarChart>
+                                                    </ResponsiveContainer>
+                                                </div>
+                                            </div>
+
+                                            {/* Chart 2: Focus Distribution (Pie) */}
+                                            <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                                                <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4 flex items-center gap-2">
+                                                    <Icons.Target className="w-4 h-4" /> Focus Distribution
+                                                </h4>
+                                                <div className="h-64 flex items-center justify-center">
+                                                    {getFocusPieData(entry).length > 0 ? (
+                                                        <ResponsiveContainer width="100%" height="100%">
+                                                            <PieChart>
+                                                                <Pie
+                                                                    data={getFocusPieData(entry)}
+                                                                    cx="50%"
+                                                                    cy="50%"
+                                                                    innerRadius={60}
+                                                                    outerRadius={80}
+                                                                    paddingAngle={5}
+                                                                    dataKey="value"
+                                                                >
+                                                                    {getFocusPieData(entry).map((entry, index) => (
+                                                                        <Cell key={`cell-${index}`} fill={entry.color} />
+                                                                    ))}
+                                                                </Pie>
+                                                                <Tooltip 
+                                                                    contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc' }}
+                                                                    formatter={(value: number) => [`${value.toFixed(1)} hrs`]}
+                                                                />
+                                                                <Legend verticalAlign="bottom" height={36}/>
+                                                            </PieChart>
+                                                        </ResponsiveContainer>
+                                                    ) : (
+                                                        <div className="text-slate-500 text-sm italic">No productivity data recorded.</div>
+                                                    )}
+                                                </div>
                                             </div>
                                         </div>
 
-                                        {/* Right: Task List */}
-                                        <div className="flex-1">
+                                        {/* ROW 2: Task List (Full Width) */}
+                                        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
                                             <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4 flex items-center gap-2">
                                                 <Icons.CheckCircle className="w-4 h-4" /> Completed Tasks
                                             </h4>
-                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                                                 {getTasksForWeek(entry).length > 0 ? (
                                                     getTasksForWeek(entry).map(task => (
-                                                        <div key={task.id} className="bg-slate-900 border border-slate-800 rounded-lg p-3 flex items-start gap-3 hover:border-slate-700 transition-colors">
+                                                        <div key={task.id} className="bg-slate-950/50 border border-slate-800 rounded-lg p-3 flex items-start gap-3 hover:border-slate-700 transition-colors">
                                                             <div className={`mt-1 w-2 h-2 rounded-full flex-shrink-0 ${task.type === TaskType.STUDY ? 'bg-indigo-500' : 'bg-teal-500'}`}></div>
                                                             <div className="overflow-hidden min-w-0">
                                                                 <p className="text-slate-200 text-sm font-medium truncate" title={task.title}>{task.title}</p>
@@ -350,13 +405,14 @@ export const History: React.FC<HistoryProps> = ({ history, tasks }) => {
                                                         </div>
                                                     ))
                                                 ) : (
-                                                    <div className="col-span-2 text-center py-8 text-slate-500 bg-slate-900 border border-slate-800 rounded-lg border-dashed">
+                                                    <div className="col-span-full text-center py-8 text-slate-500 border-dashed border border-slate-800 rounded-lg">
                                                         <Icons.LogOut className="w-6 h-6 mx-auto mb-2 opacity-50" />
                                                         <p className="text-sm">No tasks logged for this week.</p>
                                                     </div>
                                                 )}
                                             </div>
                                         </div>
+
                                     </div>
                                 </td>
                              </tr>
