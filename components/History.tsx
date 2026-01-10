@@ -9,7 +9,8 @@ import {
   CartesianGrid,
   AreaChart,
   Area,
-  ReferenceLine
+  ReferenceLine,
+  Cell
 } from 'recharts';
 import { Icons } from './Icons';
 import { HistoryEntry, Task, TaskType } from '../types';
@@ -91,12 +92,6 @@ export const History: React.FC<HistoryProps> = ({ history, tasks }) => {
 
   // Helper to get tasks for a specific week entry
   const getTasksForWeek = (entry: HistoryEntry) => {
-      // Create date objects for comparison
-      // Note: startDate string is strictly formatted YYYY-MM-DD or locale date string by App.tsx
-      // For safer comparison, we can rely on week logic or Date parsing.
-      // Since App.tsx creates stats based on timestamps, lets use timestamps.
-      // But we can also check if the completion date falls within the week range.
-      
       const start = new Date(entry.startDate).getTime();
       // Add 1 day (86400000) to end date to ensure we cover the full end day
       const end = new Date(entry.endDate).getTime() + 86400000;
@@ -105,6 +100,18 @@ export const History: React.FC<HistoryProps> = ({ history, tasks }) => {
           if (!t.completedAt) return false;
           return t.completedAt >= start && t.completedAt < end;
       });
+  };
+
+  const getWeekChartData = (entry: HistoryEntry) => {
+    const weekTasks = getTasksForWeek(entry);
+    const studyHours = weekTasks.filter(t => t.type === TaskType.STUDY).reduce((acc, t) => acc + t.durationHours, 0);
+    const workHours = weekTasks.filter(t => t.type === TaskType.WORK).reduce((acc, t) => acc + t.durationHours, 0);
+
+    return [
+      { name: 'Study', value: studyHours, color: '#818cf8' },
+      { name: 'Work', value: workHours, color: '#2dd4bf' },
+      { name: 'Screen Time', value: entry.screenTimeHours, color: '#f43f5e' }
+    ];
   };
 
   const rangeLabel = visibleHistory.length > 0 
@@ -282,28 +289,63 @@ export const History: React.FC<HistoryProps> = ({ history, tasks }) => {
                           
                           {/* Expanded Details Row */}
                           {expandedWeekId === entry.weekId && (
-                             <tr className="bg-slate-950/50">
-                                <td colSpan={6} className="px-6 py-4">
-                                    <div className="space-y-3">
-                                        <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Completed Tasks</h4>
-                                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                                            {getTasksForWeek(entry).length > 0 ? (
-                                                getTasksForWeek(entry).map(task => (
-                                                    <div key={task.id} className="bg-slate-900 border border-slate-800 rounded-lg p-3 flex items-start gap-3">
-                                                        <div className={`mt-1 w-2 h-2 rounded-full flex-shrink-0 ${task.type === TaskType.STUDY ? 'bg-indigo-500' : 'bg-teal-500'}`}></div>
-                                                        <div className="overflow-hidden">
-                                                            <p className="text-slate-200 text-sm font-medium truncate" title={task.title}>{task.title}</p>
-                                                            <div className="flex items-center gap-2 text-xs text-slate-500 mt-1">
-                                                                <span className="flex items-center gap-1"><Icons.Clock className="w-3 h-3"/> {task.durationHours}h</span>
-                                                                <span>•</span>
-                                                                <span>{new Date(task.completedAt!).toLocaleDateString()}</span>
+                             <tr className="bg-slate-950/30">
+                                <td colSpan={6} className="px-6 py-6 border-t border-b border-slate-800">
+                                    <div className="flex flex-col xl:flex-row gap-8">
+                                        
+                                        {/* Left: Productivity Chart */}
+                                        <div className="flex-1 min-w-[300px] xl:max-w-md">
+                                            <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4 flex items-center gap-2">
+                                                <Icons.BarChart className="w-4 h-4" /> Activity Analysis
+                                            </h4>
+                                            <div className="h-64 bg-slate-900 border border-slate-800 rounded-xl p-4">
+                                                <ResponsiveContainer width="100%" height="100%">
+                                                    <BarChart data={getWeekChartData(entry)}>
+                                                        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                                                        <XAxis dataKey="name" stroke="#475569" fontSize={12} tickLine={false} axisLine={false} />
+                                                        <YAxis stroke="#475569" fontSize={12} tickLine={false} axisLine={false} />
+                                                        <Tooltip 
+                                                            cursor={{fill: '#1e293b'}} 
+                                                            contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc' }}
+                                                            formatter={(value: number) => [`${value.toFixed(1)} hrs`]}
+                                                        />
+                                                        <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                                                            {getWeekChartData(entry).map((d, index) => (
+                                                                <Cell key={`cell-${index}`} fill={d.color} />
+                                                            ))}
+                                                        </Bar>
+                                                    </BarChart>
+                                                </ResponsiveContainer>
+                                            </div>
+                                        </div>
+
+                                        {/* Right: Task List */}
+                                        <div className="flex-1">
+                                            <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4 flex items-center gap-2">
+                                                <Icons.CheckCircle className="w-4 h-4" /> Completed Tasks
+                                            </h4>
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                                {getTasksForWeek(entry).length > 0 ? (
+                                                    getTasksForWeek(entry).map(task => (
+                                                        <div key={task.id} className="bg-slate-900 border border-slate-800 rounded-lg p-3 flex items-start gap-3 hover:border-slate-700 transition-colors">
+                                                            <div className={`mt-1 w-2 h-2 rounded-full flex-shrink-0 ${task.type === TaskType.STUDY ? 'bg-indigo-500' : 'bg-teal-500'}`}></div>
+                                                            <div className="overflow-hidden min-w-0">
+                                                                <p className="text-slate-200 text-sm font-medium truncate" title={task.title}>{task.title}</p>
+                                                                <div className="flex items-center gap-2 text-xs text-slate-500 mt-1">
+                                                                    <span className="flex items-center gap-1"><Icons.Clock className="w-3 h-3"/> {task.durationHours}h</span>
+                                                                    <span>•</span>
+                                                                    <span>{new Date(task.completedAt!).toLocaleDateString()}</span>
+                                                                </div>
                                                             </div>
                                                         </div>
+                                                    ))
+                                                ) : (
+                                                    <div className="col-span-2 text-center py-8 text-slate-500 bg-slate-900 border border-slate-800 rounded-lg border-dashed">
+                                                        <Icons.LogOut className="w-6 h-6 mx-auto mb-2 opacity-50" />
+                                                        <p className="text-sm">No tasks logged for this week.</p>
                                                     </div>
-                                                ))
-                                            ) : (
-                                                <p className="text-sm text-slate-500 italic col-span-3">No tasks found for this period.</p>
-                                            )}
+                                                )}
+                                            </div>
                                         </div>
                                     </div>
                                 </td>
