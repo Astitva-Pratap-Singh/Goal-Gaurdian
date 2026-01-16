@@ -105,14 +105,8 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
   const handleSaveTask = async () => {
     if (!newTaskTitle || newTaskDuration <= 0) return;
 
-    // Check limits
-    if (!editingTaskId) {
-        if (todayUsed + newTaskDuration > dailyLimit) {
-            alert(`Cannot add task. This would exceed your daily calculated limit of ${dailyLimit.toFixed(1)} hours.`);
-            return;
-        }
-    }
-
+    // Constraint removed: Users can now add tasks exceeding the daily limit.
+    
     if (editingTaskId) {
         // UPDATE EXISTING TASK
         setTasks(prev => prev.map(t => t.id === editingTaskId ? {

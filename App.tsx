@@ -9,17 +9,35 @@ import { UserProfile, WeeklyStats, Task, HistoryEntry, VerificationStatus } from
 import { calculateWeeklyRating } from './services/geminiService';
 import { supabase } from './services/supabase';
 
-// Robust ISO Week ID Calculator (YYYY-Www)
-const getCurrentWeekId = () => {
-  const d = new Date();
+// --- DATE HELPERS ---
+
+const getWeekIdFromDate = (date: Date) => {
+  const d = new Date(date);
   d.setHours(0, 0, 0, 0);
-  // Set to nearest Thursday: current date + 4 - current day number
-  // Make Sunday's day number 7
   d.setDate(d.getDate() + 4 - (d.getDay() || 7));
   const yearStart = new Date(d.getFullYear(), 0, 1);
-  // Calculate full weeks to nearest Thursday
   const weekNo = Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
   return `${d.getFullYear()}-W${String(weekNo).padStart(2, '0')}`;
+};
+
+// Robust ISO Week ID Calculator (YYYY-Www)
+const getCurrentWeekId = () => getWeekIdFromDate(new Date());
+
+const getPreviousWeekId = (weekId: string) => {
+  // Approximate reverse calculation to find the previous week ID
+  // We parse the year and week, find a date in that week, subtract 7 days, and recalculate ID
+  const [yStr, wStr] = weekId.split('-W');
+  const y = parseInt(yStr, 10);
+  const w = parseInt(wStr, 10);
+  
+  // Simple heuristic: 4th of Jan is always in week 1
+  const d = new Date(y, 0, 4);
+  // Add (w - 1) weeks to get to the target week
+  d.setDate(d.getDate() + (w - 1) * 7);
+  // Subtract 7 days to get previous week
+  d.setDate(d.getDate() - 7);
+  
+  return getWeekIdFromDate(d);
 };
 
 const App: React.FC = () => {
@@ -50,7 +68,6 @@ const App: React.FC = () => {
 
     try {
       // Parallel execution for faster load times
-      // We fetch everything at once instead of awaiting sequentially
       const [profileRes, tasksRes, historyRes, currentStatsRes] = await Promise.all([
         supabase.from('profiles').select('*').eq('google_id', googleId).single(),
         supabase.from('tasks').select('*').eq('user_id', googleId).order('created_at', { ascending: false }),
@@ -59,11 +76,11 @@ const App: React.FC = () => {
       ]);
 
       // 1. Process Profile
+      let currentUserGoal = 80;
       if (profileRes.data && user) {
-         // Only update if different to avoid flickering/unnecessary writes
-         const newGoal = profileRes.data.weekly_goal_hours || 80;
-         if (user.weeklyGoalHours !== newGoal) {
-             const updatedUser = { ...user, weeklyGoalHours: newGoal };
+         currentUserGoal = profileRes.data.weekly_goal_hours || 80;
+         if (user.weeklyGoalHours !== currentUserGoal) {
+             const updatedUser = { ...user, weeklyGoalHours: currentUserGoal };
              setUser(updatedUser);
              localStorage.setItem('focusforge_user', JSON.stringify(updatedUser));
          }
@@ -88,9 +105,9 @@ const App: React.FC = () => {
       }
 
       // 3. Process History
-      let calculatedStreak = 0;
+      let formattedHistory: HistoryEntry[] = [];
       if (historyRes.data) {
-        const formattedHistory: HistoryEntry[] = historyRes.data.map((h: any) => ({
+        formattedHistory = historyRes.data.map((h: any) => ({
           id: h.id,
           weekId: h.week_id,
           goalHours: h.goal_hours,
@@ -102,28 +119,6 @@ const App: React.FC = () => {
           endDate: h.end_date
         }));
         setHistory(formattedHistory);
-
-        // Recalculate Streak
-        const reversedHistory = [...formattedHistory].sort((a, b) => b.weekId.localeCompare(a.weekId));
-        for (const entry of reversedHistory) {
-           if (entry.completedHours >= entry.goalHours) {
-             calculatedStreak++;
-           } else {
-             break; 
-           }
-        }
-      } else {
-        setHistory([]);
-      }
-
-      // Update User Streak locally if needed
-      if (user && user.currentStreak !== calculatedStreak) {
-          setUser(prev => {
-              if (!prev) return null;
-              const updated = { ...prev, currentStreak: calculatedStreak };
-              localStorage.setItem('focusforge_user', JSON.stringify(updated));
-              return updated;
-          });
       }
 
       // 4. Process Current Stats & Self-Healing
@@ -146,10 +141,10 @@ const App: React.FC = () => {
         .reduce((acc, t) => acc + t.durationHours, 0);
 
       const statsData = currentStatsRes.data;
+      let currentStatsObj: WeeklyStats;
 
       if (statsData) {
-        // Prepare stats object
-        let statsToSet = {
+        currentStatsObj = {
           weekId: statsData.week_id,
           goalHours: statsData.goal_hours,
           completedHours: statsData.completed_hours,
@@ -160,54 +155,86 @@ const App: React.FC = () => {
           endDate: statsData.end_date
         };
 
-        // Self-heal check (Optimistic UI update)
-        // If DB stats mismatch actual task logs, use the calculated value and sync DB in background
+        // Self-heal check
         if (Math.abs(statsData.completed_hours - actualCompletedHours) > 0.1) {
-            statsToSet.completedHours = actualCompletedHours;
-            
-            // Background update - DO NOT AWAIT, prevents blocking UI
+            currentStatsObj.completedHours = actualCompletedHours;
             supabase.from('weekly_stats')
               .update({ completed_hours: actualCompletedHours })
               .eq('week_id', currentWeekId)
               .eq('user_id', googleId)
-              .then(({ error }) => {
-                 if (error) console.error("Background stat sync failed", error);
-              });
+              .then(({ error }) => { if (error) console.error("Background stat sync failed", error); });
         }
-        setStats(statsToSet);
+        setStats(currentStatsObj);
       } else {
-        // Create new week entry (Optimistic UI)
-        const currentGoal = profileRes.data?.weekly_goal_hours || (user?.weeklyGoalHours || 80);
-
-        const newStats: WeeklyStats = {
+        // Create new week
+        currentStatsObj = {
           weekId: currentWeekId,
           startDate: monday.toLocaleDateString(),
           endDate: new Date(nextMonday.getTime() - 1).toLocaleDateString(),
-          goalHours: currentGoal,
+          goalHours: currentUserGoal,
           completedHours: actualCompletedHours,
           screenTimeHours: 0,
           rating: 0,
           streakActive: true
         };
-
-        setStats(newStats);
-
-        // Background Insert - DO NOT AWAIT
+        setStats(currentStatsObj);
         supabase.from('weekly_stats').insert({
           user_id: googleId,
-          week_id: newStats.weekId,
-          start_date: newStats.startDate,
-          end_date: newStats.endDate,
-          goal_hours: newStats.goalHours,
-          completed_hours: newStats.completedHours
-        }).then(({ error }) => {
-            if (error) console.error("Error creating weekly stats", error);
-        });
+          week_id: currentStatsObj.weekId,
+          start_date: currentStatsObj.startDate,
+          end_date: currentStatsObj.endDate,
+          goal_hours: currentStatsObj.goalHours,
+          completed_hours: currentStatsObj.completedHours
+        }).then(({ error }) => { if (error) console.error("Error creating weekly stats", error); });
+      }
+
+      // --- STREAK CALCULATION LOGIC ---
+      let streak = 0;
+      let checkWeekId = currentWeekId;
+
+      // 1. Check Current Week
+      // If we have ALREADY met the goal for this week, it counts towards streak immediately.
+      // If not, we don't break the streak yet, we just don't increment it for this week.
+      if (currentStatsObj.completedHours >= currentStatsObj.goalHours) {
+        streak++;
+        // Move to check previous week
+        checkWeekId = getPreviousWeekId(checkWeekId);
+      } else {
+        // Goal not met yet for current week. 
+        // We start checking strictly from the previous week.
+        checkWeekId = getPreviousWeekId(checkWeekId);
+      }
+
+      // 2. Check History Backwards
+      const reversedHistory = [...formattedHistory].sort((a, b) => b.weekId.localeCompare(a.weekId));
+      
+      for (const entry of reversedHistory) {
+         // GAP CHECK: The entry in history MUST match the expected previous week ID.
+         // If there is a gap (missing week in DB), the streak breaks.
+         if (entry.weekId !== checkWeekId) {
+            break; 
+         }
+
+         if (entry.completedHours >= entry.goalHours) {
+           streak++;
+           checkWeekId = getPreviousWeekId(checkWeekId);
+         } else {
+           // Goal not met for this past week -> Streak broken.
+           break;
+         }
+      }
+
+      if (user && user.currentStreak !== streak) {
+          setUser(prev => {
+              if (!prev) return null;
+              const updated = { ...prev, currentStreak: streak };
+              localStorage.setItem('focusforge_user', JSON.stringify(updated));
+              return updated;
+          });
       }
 
     } catch (err) {
         console.error("Critical error fetching user data:", err);
-        // Ensure we stop loading even on error so user isn't stuck
     } finally {
         setIsLoading(false);
     }
@@ -227,20 +254,16 @@ const App: React.FC = () => {
     localStorage.setItem('focusforge_user', JSON.stringify(newUser));
     setIsAuthenticated(true);
     
-    // Fire off fetches
-    // We try to get existing profile first to honor user's goal settings
     try {
         const { data: existingProfile } = await supabase.from('profiles').select('weekly_goal_hours').eq('google_id', userData.googleId).single();
         const userGoal = existingProfile?.weekly_goal_hours || 80;
         
-        // Update user state with correct goal
         if (userGoal !== 80) {
             const refinedUser = { ...newUser, weeklyGoalHours: userGoal };
             setUser(refinedUser);
             localStorage.setItem('focusforge_user', JSON.stringify(refinedUser));
         }
 
-        // Upsert profile in background
         supabase.from('profiles').upsert({
             google_id: userData.googleId,
             email: userData.email,
@@ -302,6 +325,9 @@ const App: React.FC = () => {
        .update({ completed_hours: newCompleted, rating: newRating })
        .eq('user_id', user.googleId)
        .eq('week_id', stats.weekId);
+       
+     // Refresh data to update streak if goal is now met
+     fetchUserData(user.googleId);
   };
 
   const handleScreenTimeSubmit = async (hours: number, image: string) => {
