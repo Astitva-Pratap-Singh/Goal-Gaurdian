@@ -62,8 +62,8 @@ const App: React.FC = () => {
     }
   }, []);
 
-  const fetchUserData = async (googleId: string) => {
-    setIsLoading(true);
+  const fetchUserData = async (googleId: string, backgroundSync = false) => {
+    if (!backgroundSync) setIsLoading(true);
     const currentWeekId = getCurrentWeekId();
 
     try {
@@ -95,12 +95,14 @@ const App: React.FC = () => {
           description: t.description,
           type: t.type,
           durationHours: t.duration_hours,
-          createdAt: t.created_at,
+          createdAt: t.completed_at || t.created_at, // Use completed_at for sorting if available, else created_at
           completedAt: t.completed_at,
           status: t.status,
           proofImage: t.proof_image,
           rejectionReason: t.rejection_reason
         }));
+        // Sort by created at mostly for task list
+        formattedTasks.sort((a, b) => b.createdAt - a.createdAt);
         setTasks(formattedTasks);
       }
 
@@ -236,7 +238,7 @@ const App: React.FC = () => {
     } catch (err) {
         console.error("Critical error fetching user data:", err);
     } finally {
-        setIsLoading(false);
+        if (!backgroundSync) setIsLoading(false);
     }
   };
 
@@ -327,7 +329,8 @@ const App: React.FC = () => {
        .eq('week_id', stats.weekId);
        
      // Refresh data to update streak if goal is now met
-     fetchUserData(user.googleId);
+     // Pass true to prevent "loading" screen flash
+     fetchUserData(user.googleId, true);
   };
 
   const handleScreenTimeSubmit = async (hours: number, image: string) => {
