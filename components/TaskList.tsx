@@ -3,7 +3,7 @@ import { Icons } from './Icons';
 import { Task, TaskType, VerificationStatus, UserProfile } from '../types';
 import { verifyTaskProof } from '../services/geminiService';
 import { supabase } from '../services/supabase';
-import { uploadToR2 } from '../services/storage';
+import { optimizeFile } from '../services/storage';
 
 interface TaskListProps {
   tasks: Task[];
@@ -198,6 +198,9 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !selectedTaskForUpload) return;
+    
+    // Clear the input so the same file can be selected again if needed
+    if (fileInputRef.current) fileInputRef.current.value = '';
 
     const taskIndex = tasks.findIndex(t => t.id === selectedTaskForUpload);
     if (taskIndex === -1) return;
@@ -206,59 +209,66 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
     setVerifyingId(selectedTaskForUpload);
     updateTaskStatus(selectedTaskForUpload, VerificationStatus.VERIFYING);
 
-    const reader = new FileReader();
-    reader.onloadend = async () => {
-      const base64String = reader.result as string;
+    try {
+      // 1. Optimize Image FIRST
+      // This reduces upload size to Gemini and speeds up the process
+      const optimizedFile = await optimizeFile(file);
       
-      const result = await verifyTaskProof(taskToVerify, base64String, file.type);
-      
-      let newStatus = VerificationStatus.PENDING;
-      let rejectionReason = "";
-      let publicUrl = "";
+      const reader = new FileReader();
+      reader.onloadend = async () => {
+        const base64String = reader.result as string;
+        
+        // 2. Verify with Optimized Image
+        const result = await verifyTaskProof(taskToVerify, base64String, optimizedFile.type);
+        
+        let newStatus = VerificationStatus.PENDING;
+        let rejectionReason = "";
+        let publicUrl = "";
 
-      if (result.verified) {
-         try {
-           // Store optimized image (simulated upload)
-           publicUrl = await uploadToR2(file, user.googleId, 'tasks');
-           newStatus = VerificationStatus.VERIFIED;
+        if (result.verified) {
+           // 3. Use the SAME Base64 string for storage (No re-upload/re-process)
+           publicUrl = base64String;
            
+           newStatus = VerificationStatus.VERIFIED;
            setTasks(prev => prev.map(t => 
                t.id === selectedTaskForUpload 
                ? { ...t, status: newStatus, completedAt: Date.now(), proofImage: publicUrl } 
                : t
            ));
            updateCompletedHours(taskToVerify.durationHours);
-         } catch (uploadErr) {
-           console.error("Storage failed", uploadErr);
-           alert("Verification successful, but saving proof failed.");
-           newStatus = VerificationStatus.VERIFIED; 
-         }
-      } else {
-         newStatus = VerificationStatus.REJECTED;
-         rejectionReason = result.reason || "Verification failed";
-         setTasks(prev => prev.map(t => 
-             t.id === selectedTaskForUpload 
-             ? { ...t, status: newStatus, rejectionReason: rejectionReason } 
-             : t
-         ));
-         alert(`Verification Failed: ${rejectionReason}`);
-      }
-      
-      setVerifyingId(null);
-      
-      // Use timestamp number for DB compatibility
-      const completedAt = result.verified ? Date.now() : null;
+        } else {
+           newStatus = VerificationStatus.REJECTED;
+           rejectionReason = result.reason || "Verification failed";
+           setTasks(prev => prev.map(t => 
+               t.id === selectedTaskForUpload 
+               ? { ...t, status: newStatus, rejectionReason: rejectionReason } 
+               : t
+           ));
+           alert(`Verification Failed: ${rejectionReason}`);
+        }
+        
+        setVerifyingId(null);
+        // Clear selection to avoid state lingering
+        const currentTaskId = selectedTaskForUpload;
+        setSelectedTaskForUpload(null);
+        
+        // Use timestamp number for DB compatibility
+        const completedAt = result.verified ? Date.now() : null;
 
-      await supabase.from('tasks').update({
-        status: newStatus,
-        completed_at: completedAt,
-        proof_image: publicUrl || null,
-        rejection_reason: rejectionReason
-      }).eq('id', selectedTaskForUpload);
+        await supabase.from('tasks').update({
+          status: newStatus,
+          completed_at: completedAt,
+          proof_image: publicUrl || null,
+          rejection_reason: rejectionReason
+        }).eq('id', currentTaskId);
+      };
+      reader.readAsDataURL(optimizedFile);
 
-      setSelectedTaskForUpload(null);
-    };
-    reader.readAsDataURL(file);
+    } catch (err) {
+        console.error("File processing error", err);
+        setVerifyingId(null);
+        alert("Error processing file. Please try again.");
+    }
   };
 
   const updateTaskStatus = (id: string, status: VerificationStatus) => {
