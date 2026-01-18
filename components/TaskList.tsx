@@ -197,21 +197,22 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !selectedTaskForUpload) return;
+    const currentTaskId = selectedTaskForUpload; // Capture ID immediately
+
+    if (!file || !currentTaskId) return;
     
     // Clear the input so the same file can be selected again if needed
     if (fileInputRef.current) fileInputRef.current.value = '';
 
-    const taskIndex = tasks.findIndex(t => t.id === selectedTaskForUpload);
+    const taskIndex = tasks.findIndex(t => t.id === currentTaskId);
     if (taskIndex === -1) return;
     const taskToVerify = tasks[taskIndex];
 
-    setVerifyingId(selectedTaskForUpload);
-    updateTaskStatus(selectedTaskForUpload, VerificationStatus.VERIFYING);
+    setVerifyingId(currentTaskId);
+    updateTaskStatus(currentTaskId, VerificationStatus.VERIFYING);
 
     try {
       // 1. Optimize Image FIRST
-      // This reduces upload size to Gemini and speeds up the process
       const optimizedFile = await optimizeFile(file);
       
       const reader = new FileReader();
@@ -224,43 +225,50 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
         let newStatus = VerificationStatus.PENDING;
         let rejectionReason = "";
         let publicUrl = "";
+        let completedAt: number | null = null;
 
         if (result.verified) {
-           // 3. Use the SAME Base64 string for storage (No re-upload/re-process)
+           // Reuse Base64 string for storage
            publicUrl = base64String;
-           
            newStatus = VerificationStatus.VERIFIED;
-           setTasks(prev => prev.map(t => 
-               t.id === selectedTaskForUpload 
-               ? { ...t, status: newStatus, completedAt: Date.now(), proofImage: publicUrl } 
-               : t
-           ));
-           updateCompletedHours(taskToVerify.durationHours);
+           completedAt = Date.now();
         } else {
            newStatus = VerificationStatus.REJECTED;
            rejectionReason = result.reason || "Verification failed";
-           setTasks(prev => prev.map(t => 
-               t.id === selectedTaskForUpload 
-               ? { ...t, status: newStatus, rejectionReason: rejectionReason } 
-               : t
-           ));
-           alert(`Verification Failed: ${rejectionReason}`);
         }
         
-        setVerifyingId(null);
-        // Clear selection to avoid state lingering
-        const currentTaskId = selectedTaskForUpload;
-        setSelectedTaskForUpload(null);
-        
-        // Use timestamp number for DB compatibility
-        const completedAt = result.verified ? Date.now() : null;
-
+        // 3. CRITICAL: Update Database BEFORE updating parent stats
+        // This prevents the race condition where `updateCompletedHours` triggers a fetch
+        // that receives stale data because the task update hadn't finished.
         await supabase.from('tasks').update({
           status: newStatus,
           completed_at: completedAt,
           proof_image: publicUrl || null,
           rejection_reason: rejectionReason
         }).eq('id', currentTaskId);
+
+        // 4. Update Local State
+        setTasks(prev => prev.map(t => 
+            t.id === currentTaskId 
+            ? { 
+                ...t, 
+                status: newStatus, 
+                completedAt: completedAt || undefined, 
+                proofImage: publicUrl,
+                rejectionReason: rejectionReason 
+              } 
+            : t
+        ));
+
+        setVerifyingId(null);
+        setSelectedTaskForUpload(null);
+
+        // 5. Trigger Stats Update (which triggers app-wide refetch)
+        if (result.verified) {
+           updateCompletedHours(taskToVerify.durationHours);
+        } else if (!result.verified) {
+           alert(`Verification Failed: ${rejectionReason}`);
+        }
       };
       reader.readAsDataURL(optimizedFile);
 
