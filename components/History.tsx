@@ -242,8 +242,10 @@ export const History: React.FC<HistoryProps> = ({ history, tasks }) => {
                          cursor={{fill: '#1e293b'}} 
                          contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc' }}
                       />
+                      <Legend />
                       <Bar dataKey="completedHours" name="Completed" fill="#6366f1" radius={[4, 4, 0, 0]} barSize={20} />
                       <Bar dataKey="goalHours" name="Goal" fill="#334155" radius={[4, 4, 0, 0]} barSize={20} />
+                      <Bar dataKey="screenTimeHours" name="Screen Time" fill="#f43f5e" radius={[4, 4, 0, 0]} barSize={20} />
                    </BarChart>
                 </ResponsiveContainer>
              </div>
@@ -261,8 +263,9 @@ export const History: React.FC<HistoryProps> = ({ history, tasks }) => {
                       <Tooltip 
                          contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc' }}
                       />
+                      <Legend />
                       <ReferenceLine y={21} stroke="#ef4444" strokeDasharray="3 3" label={{ value: 'Limit', position: 'insideTopRight', fill: '#ef4444', fontSize: 10 }} />
-                      <Area type="monotone" dataKey="screenTimeHours" stroke="#f43f5e" fill="#f43f5e" fillOpacity={0.2} strokeWidth={2} />
+                      <Area type="monotone" name="Screen Time" dataKey="screenTimeHours" stroke="#f43f5e" fill="#f43f5e" fillOpacity={0.2} strokeWidth={2} />
                    </AreaChart>
                 </ResponsiveContainer>
              </div>
