@@ -28,6 +28,7 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
 
   // Proof Preview State
   const [previewProof, setPreviewProof] = useState<string | null>(null);
+  const [loadingProofId, setLoadingProofId] = useState<string | null>(null);
 
   // Daily Limit Calculation
   const dailyLimit = user.weeklyGoalHours / 7;
@@ -105,8 +106,6 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
   const handleSaveTask = async () => {
     if (!newTaskTitle || newTaskDuration <= 0) return;
 
-    // Constraint removed: Users can now add tasks exceeding the daily limit.
-    
     if (editingTaskId) {
         // UPDATE EXISTING TASK
         setTasks(prev => prev.map(t => t.id === editingTaskId ? {
@@ -158,7 +157,7 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
             type: newTask.type,
             duration_hours: newTask.durationHours,
             status: newTask.status,
-            created_at: newTask.createdAt 
+            created_at: newTask.createdAt // Passing number, supabase handles timestamp conversion if column is timestamp/timestamptz
         }).select();
 
         // Update with real ID from DB if successful
@@ -192,6 +191,39 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
     if (error) {
       console.error("Error deleting task", error);
       alert("Failed to delete task from server.");
+    }
+  };
+
+  // --- LAZY LOADING PROOF ---
+  const handleViewProof = async (task: Task) => {
+    // If we already have the base64, just show it
+    if (task.proofImage) {
+      setPreviewProof(task.proofImage);
+      return;
+    }
+
+    try {
+      setLoadingProofId(task.id);
+      const { data, error } = await supabase
+        .from('tasks')
+        .select('proof_image')
+        .eq('id', task.id)
+        .single();
+
+      if (error) throw error;
+      
+      if (data && data.proof_image) {
+        // Update local task state to cache the image so we don't fetch again
+        setTasks(prev => prev.map(t => t.id === task.id ? { ...t, proofImage: data.proof_image } : t));
+        setPreviewProof(data.proof_image);
+      } else {
+        alert("No proof image found for this task.");
+      }
+    } catch (err) {
+      console.error("Error fetching proof:", err);
+      alert("Failed to load proof image.");
+    } finally {
+      setLoadingProofId(null);
     }
   };
 
@@ -238,8 +270,6 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
         }
         
         // 3. CRITICAL: Update Database BEFORE updating parent stats
-        // This prevents the race condition where `updateCompletedHours` triggers a fetch
-        // that receives stale data because the task update hadn't finished.
         await supabase.from('tasks').update({
           status: newStatus,
           completed_at: completedAt,
@@ -263,7 +293,7 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
         setVerifyingId(null);
         setSelectedTaskForUpload(null);
 
-        // 5. Trigger Stats Update (which triggers app-wide refetch)
+        // 5. Trigger Stats Update (No full re-sync)
         if (result.verified) {
            updateCompletedHours(taskToVerify.durationHours);
         } else if (!result.verified) {
@@ -351,12 +381,14 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
               <h3 className="text-lg font-semibold text-slate-100 pr-8">{task.title}</h3>
               <p className="text-slate-400 text-sm mt-1">{task.description}</p>
               
-              {task.status === VerificationStatus.VERIFIED && task.proofImage && (
+              {/* UPDATED: View Proof button logic checks status NOT task.proofImage presence */}
+              {task.status === VerificationStatus.VERIFIED && (
                   <button 
-                    onClick={() => setPreviewProof(task.proofImage!)}
-                    className="flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 hover:bg-indigo-950/30 px-2 py-1 -ml-2 mt-2 rounded transition-colors"
+                    onClick={() => handleViewProof(task)}
+                    disabled={loadingProofId === task.id}
+                    className="flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 hover:bg-indigo-950/30 px-2 py-1 -ml-2 mt-2 rounded transition-colors disabled:opacity-50 disabled:cursor-wait"
                   >
-                    <Icons.Eye className="w-4 h-4" />
+                    {loadingProofId === task.id ? <Icons.Loader className="w-4 h-4 animate-spin" /> : <Icons.Eye className="w-4 h-4" />}
                     View Proof
                   </button>
               )}

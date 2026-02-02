@@ -5,6 +5,7 @@ import { TaskList } from './components/TaskList';
 import { ScreenTimeUpload } from './components/ScreenTimeUpload';
 import { History } from './components/History';
 import { Auth } from './components/Auth';
+import { Icons } from './components/Icons';
 import { UserProfile, WeeklyStats, Task, HistoryEntry, VerificationStatus } from './types';
 import { calculateWeeklyRating } from './services/geminiService';
 import { supabase } from './services/supabase';
@@ -68,9 +69,15 @@ const App: React.FC = () => {
 
     try {
       // Parallel execution for faster load times
+      // CRITICAL OPTIMIZATION: Exclude 'proof_image' from tasks fetch. It is huge (Base64).
+      // We load it on-demand in TaskList.
       const [profileRes, tasksRes, historyRes, currentStatsRes] = await Promise.all([
         supabase.from('profiles').select('*').eq('google_id', googleId).single(),
-        supabase.from('tasks').select('*').eq('user_id', googleId).order('created_at', { ascending: false }),
+        supabase
+          .from('tasks')
+          .select('id, title, description, type, duration_hours, created_at, completed_at, status, rejection_reason') // Explicitly select columns to avoid downloading images
+          .eq('user_id', googleId)
+          .order('created_at', { ascending: false }), 
         supabase.from('weekly_stats').select('*').eq('user_id', googleId).neq('week_id', currentWeekId).order('week_id', { ascending: true }),
         supabase.from('weekly_stats').select('*').eq('user_id', googleId).eq('week_id', currentWeekId).single()
       ]);
@@ -95,13 +102,14 @@ const App: React.FC = () => {
           description: t.description,
           type: t.type,
           durationHours: t.duration_hours,
-          createdAt: t.completed_at || t.created_at, // Use completed_at for sorting if available, else created_at
-          completedAt: t.completed_at,
+          // Convert to timestamp numbers for reliable sorting/math
+          createdAt: new Date(t.completed_at || t.created_at).getTime(), 
+          completedAt: t.completed_at ? new Date(t.completed_at).getTime() : undefined,
           status: t.status,
-          proofImage: t.proof_image,
+          // proofImage is undefined here to save bandwidth. Loaded lazy.
           rejectionReason: t.rejection_reason
         }));
-        // Sort by created at mostly for task list
+        // Sort in memory to ensure order
         formattedTasks.sort((a, b) => b.createdAt - a.createdAt);
         setTasks(formattedTasks);
       }
@@ -124,7 +132,6 @@ const App: React.FC = () => {
       }
 
       // 4. Process Current Stats & Self-Healing
-      // Calculate actual completed hours for THIS week from Tasks
       const now = new Date();
       const currentDay = now.getDay(); 
       const distanceToMonday = currentDay === 0 ? 6 : currentDay - 1;
@@ -157,9 +164,10 @@ const App: React.FC = () => {
           endDate: statsData.end_date
         };
 
-        // Self-heal check
+        // Self-heal check (only if significant difference)
         if (Math.abs(statsData.completed_hours - actualCompletedHours) > 0.1) {
             currentStatsObj.completedHours = actualCompletedHours;
+            // Fire and forget update
             supabase.from('weekly_stats')
               .update({ completed_hours: actualCompletedHours })
               .eq('week_id', currentWeekId)
@@ -194,34 +202,21 @@ const App: React.FC = () => {
       let streak = 0;
       let checkWeekId = currentWeekId;
 
-      // 1. Check Current Week
-      // If we have ALREADY met the goal for this week, it counts towards streak immediately.
-      // If not, we don't break the streak yet, we just don't increment it for this week.
       if (currentStatsObj.completedHours >= currentStatsObj.goalHours) {
         streak++;
-        // Move to check previous week
         checkWeekId = getPreviousWeekId(checkWeekId);
       } else {
-        // Goal not met yet for current week. 
-        // We start checking strictly from the previous week.
         checkWeekId = getPreviousWeekId(checkWeekId);
       }
 
-      // 2. Check History Backwards
       const reversedHistory = [...formattedHistory].sort((a, b) => b.weekId.localeCompare(a.weekId));
       
       for (const entry of reversedHistory) {
-         // GAP CHECK: The entry in history MUST match the expected previous week ID.
-         // If there is a gap (missing week in DB), the streak breaks.
-         if (entry.weekId !== checkWeekId) {
-            break; 
-         }
-
+         if (entry.weekId !== checkWeekId) break; 
          if (entry.completedHours >= entry.goalHours) {
            streak++;
            checkWeekId = getPreviousWeekId(checkWeekId);
          } else {
-           // Goal not met for this past week -> Streak broken.
            break;
          }
       }
@@ -243,42 +238,33 @@ const App: React.FC = () => {
   };
 
   const handleLogin = async (userData: any) => {
-    // Optimistic Login Handling
     const newUser: UserProfile = {
       name: userData.name,
       email: userData.email,
       avatarUrl: userData.avatarUrl,
       googleId: userData.googleId,
-      weeklyGoalHours: 80, // Default until fetched
+      weeklyGoalHours: 80, 
       currentStreak: 0 
     };
     setUser(newUser);
     localStorage.setItem('focusforge_user', JSON.stringify(newUser));
     setIsAuthenticated(true);
     
-    try {
-        const { data: existingProfile } = await supabase.from('profiles').select('weekly_goal_hours').eq('google_id', userData.googleId).single();
-        const userGoal = existingProfile?.weekly_goal_hours || 80;
-        
-        if (userGoal !== 80) {
-            const refinedUser = { ...newUser, weeklyGoalHours: userGoal };
-            setUser(refinedUser);
-            localStorage.setItem('focusforge_user', JSON.stringify(refinedUser));
-        }
-
-        supabase.from('profiles').upsert({
+    // Fire and forget profile upsert
+    supabase.from('profiles').select('weekly_goal_hours').eq('google_id', userData.googleId).single()
+      .then(({data}) => {
+         const userGoal = data?.weekly_goal_hours || 80;
+         if (userGoal !== 80) {
+             setUser(prev => prev ? { ...prev, weeklyGoalHours: userGoal } : prev);
+         }
+         return supabase.from('profiles').upsert({
             google_id: userData.googleId,
             email: userData.email,
             name: userData.name,
             avatar_url: userData.avatarUrl,
             weekly_goal_hours: userGoal 
-        }, { onConflict: 'google_id' }).then(({ error }) => {
-             if (error) console.error("Supabase Profile Upsert Error", error);
-        });
-
-    } catch (e) {
-        console.error("Login process error", e);
-    }
+        }, { onConflict: 'google_id' });
+      });
 
     fetchUserData(userData.googleId);
   };
@@ -299,6 +285,7 @@ const App: React.FC = () => {
     setUser(updatedUser);
     localStorage.setItem('focusforge_user', JSON.stringify(updatedUser));
     
+    // Optimistic UI updates, no need to wait or refetch
     await supabase.from('profiles').update({ weekly_goal_hours: newGoal }).eq('google_id', user.googleId);
     
     if (stats) {
@@ -320,17 +307,18 @@ const App: React.FC = () => {
        stats.screenTimeHours
      );
 
+     // Optimistic Update
      setStats(prev => prev ? ({ ...prev, completedHours: newCompleted, rating: newRating }) : null);
      
+     // Background DB Update
      await supabase
        .from('weekly_stats')
        .update({ completed_hours: newCompleted, rating: newRating })
        .eq('user_id', user.googleId)
        .eq('week_id', stats.weekId);
        
-     // Refresh data to update streak if goal is now met
-     // Pass true to prevent "loading" screen flash
-     fetchUserData(user.googleId, true);
+     // REMOVED: fetchUserData call. Local state is already accurate.
+     // This prevents the "way too time taking" sync after every task.
   };
 
   const handleScreenTimeSubmit = async (hours: number, image: string) => {
@@ -359,8 +347,8 @@ const App: React.FC = () => {
   if (isLoading || !stats) {
     return <div className="min-h-screen bg-[#020617] flex items-center justify-center text-white">
         <div className="flex flex-col items-center gap-4">
-            <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
-            <p>Syncing verified tasks...</p>
+            <Icons.Loader className="w-8 h-8 text-indigo-500 animate-spin" />
+            <p className="text-slate-400 font-medium">Syncing data...</p>
         </div>
     </div>;
   }
