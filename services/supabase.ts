@@ -15,7 +15,7 @@ const getEnv = (key: string) => {
   return "";
 };
 
-const supabaseUrl = getEnv('SUPABASE_URL');
-const supabaseAnonKey = getEnv('SUPABASE_ANON_KEY');
+const supabaseUrl = getEnv('SUPABASE_URL') || 'https://placeholder.supabase.co';
+const supabaseAnonKey = getEnv('SUPABASE_ANON_KEY') || 'placeholder-key';
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);

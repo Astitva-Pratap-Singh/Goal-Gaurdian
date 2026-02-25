@@ -51,6 +51,7 @@ const App: React.FC = () => {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   // Check for existing session
   useEffect(() => {
@@ -64,7 +65,10 @@ const App: React.FC = () => {
   }, []);
 
   const fetchUserData = async (googleId: string, backgroundSync = false) => {
-    if (!backgroundSync) setIsLoading(true);
+    if (!backgroundSync) {
+      setIsLoading(true);
+      setFetchError(null);
+    }
     const currentWeekId = getCurrentWeekId();
 
     try {
@@ -82,6 +86,20 @@ const App: React.FC = () => {
         supabase.from('weekly_stats').select('*').eq('user_id', googleId).eq('week_id', currentWeekId).single()
       ]);
 
+      // Check for missing tables or other critical DB errors
+      const errors = [profileRes.error, tasksRes.error, historyRes.error, currentStatsRes.error];
+      for (const err of errors) {
+        if (err && err.code === '42P01') {
+          throw new Error("Database tables are missing. Please run the SQL schema to recreate them.");
+        }
+        if (err && err.message && (err.message.includes('Load failed') || err.message.includes('Failed to fetch'))) {
+          throw new Error("Network error: Could not connect to Supabase. If you are on a mobile device, ensure SUPABASE_URL uses your computer's local IP address (e.g., 192.168.x.x) instead of localhost.");
+        }
+      }
+      if (profileRes.error && profileRes.error.code !== 'PGRST116') {
+        throw new Error(profileRes.error.message);
+      }
+
       // 1. Process Profile
       let currentUserGoal = 80;
       if (profileRes.data && user) {
@@ -90,6 +108,21 @@ const App: React.FC = () => {
              const updatedUser = { ...user, weeklyGoalHours: currentUserGoal };
              setUser(updatedUser);
              localStorage.setItem('focusforge_user', JSON.stringify(updatedUser));
+         }
+      } else if (profileRes.error && profileRes.error.code === 'PGRST116') {
+         // Profile doesn't exist (e.g. DB was wiped but localStorage remained)
+         // We can recreate it using the data from localStorage
+         const savedUser = localStorage.getItem('focusforge_user');
+         if (savedUser) {
+             const parsedUser = JSON.parse(savedUser);
+             await supabase.from('profiles').upsert({
+                 google_id: googleId,
+                 email: parsedUser.email,
+                 name: parsedUser.name,
+                 avatar_url: parsedUser.avatarUrl,
+                 weekly_goal_hours: parsedUser.weeklyGoalHours || 80
+             }, { onConflict: 'google_id' });
+             currentUserGoal = parsedUser.weeklyGoalHours || 80;
          }
       }
 
@@ -230,8 +263,9 @@ const App: React.FC = () => {
           });
       }
 
-    } catch (err) {
+    } catch (err: any) {
         console.error("Critical error fetching user data:", err);
+        setFetchError(err.message || "Failed to connect to Supabase. Is the container running?");
     } finally {
         if (!backgroundSync) setIsLoading(false);
     }
@@ -250,21 +284,23 @@ const App: React.FC = () => {
     localStorage.setItem('focusforge_user', JSON.stringify(newUser));
     setIsAuthenticated(true);
     
-    // Fire and forget profile upsert
-    supabase.from('profiles').select('weekly_goal_hours').eq('google_id', userData.googleId).single()
-      .then(({data}) => {
-         const userGoal = data?.weekly_goal_hours || 80;
-         if (userGoal !== 80) {
-             setUser(prev => prev ? { ...prev, weeklyGoalHours: userGoal } : prev);
-         }
-         return supabase.from('profiles').upsert({
-            google_id: userData.googleId,
-            email: userData.email,
-            name: userData.name,
-            avatar_url: userData.avatarUrl,
-            weekly_goal_hours: userGoal 
-        }, { onConflict: 'google_id' });
-      });
+    try {
+      // Await profile upsert to prevent foreign key errors in fetchUserData
+      const { data } = await supabase.from('profiles').select('weekly_goal_hours').eq('google_id', userData.googleId).single();
+      const userGoal = data?.weekly_goal_hours || 80;
+      if (userGoal !== 80) {
+          setUser(prev => prev ? { ...prev, weeklyGoalHours: userGoal } : prev);
+      }
+      await supabase.from('profiles').upsert({
+          google_id: userData.googleId,
+          email: userData.email,
+          name: userData.name,
+          avatar_url: userData.avatarUrl,
+          weekly_goal_hours: userGoal 
+      }, { onConflict: 'google_id' });
+    } catch (err) {
+      console.error("Error upserting profile:", err);
+    }
 
     fetchUserData(userData.googleId);
   };
@@ -345,12 +381,40 @@ const App: React.FC = () => {
   }
 
   if (isLoading || !stats) {
-    return <div className="min-h-screen bg-[#020617] flex items-center justify-center text-white">
-        <div className="flex flex-col items-center gap-4">
-            <Icons.Loader className="w-8 h-8 text-indigo-500 animate-spin" />
-            <p className="text-slate-400 font-medium">Syncing data...</p>
+    if (!fetchError) {
+      return <div className="min-h-screen bg-[#020617] flex items-center justify-center text-white">
+          <div className="flex flex-col items-center gap-4">
+              <Icons.Loader className="w-8 h-8 text-indigo-500 animate-spin" />
+              <p className="text-slate-400 font-medium">Syncing data...</p>
+          </div>
+      </div>;
+    }
+  }
+
+  if (fetchError) {
+    return (
+      <div className="min-h-screen bg-[#020617] flex items-center justify-center text-white p-4">
+        <div className="bg-slate-900 border border-red-900/50 rounded-2xl p-8 max-w-md w-full text-center shadow-2xl">
+          <Icons.Shield className="w-12 h-12 text-red-500 mx-auto mb-4" />
+          <h2 className="text-2xl font-bold text-white mb-2">Load Failed</h2>
+          <p className="text-slate-400 mb-6">{fetchError}</p>
+          <div className="flex gap-4 justify-center">
+            <button 
+              onClick={() => fetchUserData(user.googleId!)}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2 rounded-lg font-medium transition-colors"
+            >
+              Retry
+            </button>
+            <button 
+              onClick={handleLogout}
+              className="bg-slate-800 hover:bg-slate-700 text-white px-6 py-2 rounded-lg font-medium transition-colors"
+            >
+              Logout
+            </button>
+          </div>
         </div>
-    </div>;
+      </div>
+    );
   }
 
   return (
@@ -365,10 +429,10 @@ const App: React.FC = () => {
       
       <main className="flex-1 md:ml-64 p-4 md:p-8 overflow-y-auto h-screen">
         <div className="max-w-7xl mx-auto h-full">
-          {currentView === 'dashboard' && <Dashboard user={user} stats={stats} tasks={tasks} />}
+          {currentView === 'dashboard' && <Dashboard user={user} stats={stats!} tasks={tasks} />}
           {currentView === 'tasks' && <TaskList tasks={tasks} setTasks={setTasks} user={user} updateCompletedHours={updateCompletedHours} />}
           {currentView === 'screentime' && <ScreenTimeUpload user={user} onSubmit={handleScreenTimeSubmit} />}
-          {currentView === 'history' && <History history={[...history, { ...stats, id: 'current' } as HistoryEntry]} tasks={tasks} />}
+          {currentView === 'history' && <History history={[...history, { ...stats!, id: 'current' } as HistoryEntry]} tasks={tasks} />}
         </div>
       </main>
     </div>

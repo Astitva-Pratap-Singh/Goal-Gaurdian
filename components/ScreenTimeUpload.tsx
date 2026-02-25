@@ -27,7 +27,7 @@ export const ScreenTimeUpload: React.FC<ScreenTimeUploadProps> = ({ user, onSubm
   };
 
   const handleSubmit = async () => {
-    if (hours >= 0 && file && user) {
+    if (hours >= 0 && file && user && user.googleId) {
       try {
         setIsUploading(true);
         // Upload simulation (Stores Base64)
