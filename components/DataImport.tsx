@@ -126,52 +126,46 @@ export const DataImport: React.FC<DataImportProps> = ({ user }) => {
     setErrorMessage(null);
 
     try {
-      const batch = writeBatch(db);
       const collectionName = importType === 'tasks' ? 'tasks' : 'weeklyStats';
       const collectionRef = collection(db, collectionName);
 
-      let count = 0;
-      for (const csvRow of previewData) {
-        let docData: any;
-        let docId: string;
-
-        if (importType === 'tasks') {
-          const task = mapCSVToTask(csvRow as CSVTask);
-          docId = task.id;
-          docData = {
-            ...task,
-            userId: user.googleId || 'anonymous'
-          };
-        } else {
-          const stats = mapCSVToWeeklyStats(csvRow as CSVWeeklyStats);
-          docId = (csvRow as CSVWeeklyStats).id || stats.weekId; // Use ID from CSV if available, else weekId
-          docData = {
-            ...stats,
-            userId: user.googleId || 'anonymous'
-          };
-        }
-
-        // Remove undefined fields to prevent Firestore errors
-        docData = removeUndefined(docData);
-
-        const docRef = doc(collectionRef, docId);
-        batch.set(docRef, docData);
-        count++;
-
-        if (count >= 450) {
-          await batch.commit();
-          // Note: In a real app, we'd need to start a new batch here.
-          // For now, this simple implementation might miss records > 450 if we don't reset.
-          // Since we can't reuse batch, we should ideally break or create a new batch instance.
-          // Given the constraints and likely file size, we'll just process the first 450 
-          // or we could refactor to chunking. 
-          // Let's just break for safety in this iteration or assume < 450.
-          // To be better, let's just stop here to avoid partial state confusion without proper chunking logic.
-          break; 
-        }
+      // Process in chunks of 50 to avoid payload size limits
+      const CHUNK_SIZE = 50;
+      const chunks = [];
+      for (let i = 0; i < previewData.length; i += CHUNK_SIZE) {
+        chunks.push(previewData.slice(i, i + CHUNK_SIZE));
       }
 
-      if (count > 0 && count < 450) {
+      for (const chunk of chunks) {
+        const batch = writeBatch(db);
+        
+        for (const csvRow of chunk) {
+          let docData: any;
+          let docId: string;
+
+          if (importType === 'tasks') {
+            const task = mapCSVToTask(csvRow as CSVTask);
+            docId = task.id;
+            docData = {
+              ...task,
+              userId: user.googleId || 'anonymous'
+            };
+          } else {
+            const stats = mapCSVToWeeklyStats(csvRow as CSVWeeklyStats);
+            docId = (csvRow as CSVWeeklyStats).id || stats.weekId;
+            docData = {
+              ...stats,
+              userId: user.googleId || 'anonymous'
+            };
+          }
+
+          // Remove undefined fields to prevent Firestore errors
+          docData = removeUndefined(docData);
+
+          const docRef = doc(collectionRef, docId);
+          batch.set(docRef, docData);
+        }
+
         await batch.commit();
       }
 
