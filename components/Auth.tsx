@@ -1,39 +1,73 @@
-import React, { useEffect } from 'react';
+import React, { useState } from 'react';
 import { Icons } from './Icons';
 import { auth, googleProvider } from '../services/firebase';
-import { signInWithPopup } from 'firebase/auth';
+import { signInWithPopup, signInAnonymously } from 'firebase/auth';
 
 interface AuthProps {
   onLogin: (user: any) => void;
 }
 
 export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
+  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
   
   const handleGoogleLogin = async () => {
+    setIsLoading(true);
+    setError(null);
     try {
       const result = await signInWithPopup(auth, googleProvider);
       const user = result.user;
+      // onLogin is actually redundant if App.tsx listens to onAuthStateChanged, 
+      // but we keep it for immediate feedback or if the parent uses it.
       onLogin({
         name: user.displayName,
         email: user.email,
         avatarUrl: user.photoURL,
-        googleId: user.uid // Using Firebase UID as googleId
+        googleId: user.uid
       });
-    } catch (error) {
-      console.error("Auth Error", error);
-      alert("Failed to sign in with Google");
+    } catch (err: any) {
+      console.error("Auth Error", err);
+      let msg = "Failed to sign in with Google.";
+      if (err.code === 'auth/unauthorized-domain') {
+        msg = "Domain not authorized. Add this URL to Firebase Console > Authentication > Settings > Authorized Domains.";
+      } else if (err.code === 'auth/popup-closed-by-user') {
+        msg = "Sign-in cancelled.";
+      } else if (err.code === 'auth/operation-not-allowed') {
+        msg = "Google Sign-In is not enabled in Firebase Console.";
+      } else if (err.code === 'auth/api-key-not-valid-please-pass-a-valid-api-key') {
+        msg = "Invalid API Key. Check your .env file.";
+      }
+      setError(msg);
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  // Fallback for development since we don't have a real Client ID in this demo environment
-  const handleDevLogin = () => {
-    onLogin({
-      name: "Demo User",
-      email: "demo@goalguardian.ai",
-      avatarUrl: "https://api.dicebear.com/7.x/avataaars/svg?seed=GoalGuardian",
-      googleId: "dev-123"
-    });
+  const handleAnonymousLogin = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const result = await signInAnonymously(auth);
+      const user = result.user;
+      onLogin({
+        name: "Guest User",
+        email: "guest@goalguardian.ai",
+        avatarUrl: `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.uid}`,
+        googleId: user.uid
+      });
+    } catch (err: any) {
+      console.error("Anonymous Auth Error", err);
+      let msg = "Failed to enter Guest Mode.";
+      if (err.code === 'auth/operation-not-allowed') {
+        msg = "Anonymous Sign-In is not enabled. Please enable it in Firebase Console > Authentication > Sign-in method.";
+      }
+      setError(msg);
+    } finally {
+      setIsLoading(false);
+    }
   };
+
+  const hasApiKey = !!import.meta.env.VITE_FIREBASE_API_KEY;
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#020617] p-4 relative overflow-hidden">
@@ -51,28 +85,48 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
           <p className="text-slate-400">Strict, AI-Verified Productivity.</p>
         </div>
 
+        {!hasApiKey && (
+           <div className="mb-6 p-4 bg-red-950/30 border border-red-900/50 rounded-lg text-red-200 text-sm text-center">
+              <strong>Configuration Missing</strong><br/>
+              Please add VITE_FIREBASE_API_KEY and other config to your .env file.
+           </div>
+        )}
+
+        {error && (
+           <div className="mb-6 p-4 bg-red-950/30 border border-red-900/50 rounded-lg text-red-200 text-sm text-center">
+              {error}
+           </div>
+        )}
+
         <div className="space-y-6">
           <div className="flex flex-col gap-4">
              {/* Firebase Google Button */}
              <button 
                 onClick={handleGoogleLogin}
-                className="w-full bg-white hover:bg-slate-100 text-slate-900 font-medium py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors"
+                disabled={isLoading || !hasApiKey}
+                className="w-full bg-white hover:bg-slate-100 text-slate-900 font-medium py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-                <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5" alt="Google" />
+                {isLoading ? (
+                  <Icons.Loader className="w-5 h-5 animate-spin" />
+                ) : (
+                  <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5" alt="Google" />
+                )}
                 Continue with Google
             </button>
              
              <div className="relative flex py-2 items-center">
                 <div className="flex-grow border-t border-slate-800"></div>
-                <span className="flex-shrink-0 mx-4 text-slate-600 text-xs">DEMO ACCESS</span>
+                <span className="flex-shrink-0 mx-4 text-slate-600 text-xs">OR</span>
                 <div className="flex-grow border-t border-slate-800"></div>
             </div>
 
             <button 
-                onClick={handleDevLogin}
-                className="w-full bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors border border-slate-700"
+                onClick={handleAnonymousLogin}
+                disabled={isLoading || !hasApiKey}
+                className="w-full bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors border border-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-                Enter Demo Mode
+                {isLoading ? <Icons.Loader className="w-5 h-5 animate-spin" /> : <Icons.User className="w-5 h-5" />}
+                Guest Mode (Anonymous)
             </button>
           </div>
         </div>
