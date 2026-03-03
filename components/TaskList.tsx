@@ -261,15 +261,15 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
         let completedAt: number | null = null;
 
         if (result.verified) {
-           // 3. Upload to Firebase Storage if verified
+           // 3. Store Base64 directly in Firestore (no Storage bucket needed)
            try {
-             const path = `proofs/${user.googleId}/${Date.now()}_${optimizedFile.name}`;
-             publicUrl = await uploadFile(optimizedFile, path);
+             // uploadFile now returns the base64 string directly
+             publicUrl = await uploadFile(optimizedFile, ''); 
              newStatus = VerificationStatus.VERIFIED;
              completedAt = Date.now();
            } catch (uploadErr) {
-             console.error("Upload failed", uploadErr);
-             alert("Verification successful but upload failed. Please try again.");
+             console.error("Image processing failed", uploadErr);
+             alert("Verification successful but image processing failed. Please try again.");
              updateTaskStatus(currentTaskId, VerificationStatus.PENDING);
              setVerifyingId(null);
              return;

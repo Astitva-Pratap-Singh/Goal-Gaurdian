@@ -1,5 +1,3 @@
-import { storage } from './firebase';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import imageCompression from 'browser-image-compression';
 
 /**
@@ -13,8 +11,8 @@ export const optimizeFile = async (file: File): Promise<File> => {
   }
 
   const options = {
-    maxSizeMB: 0.5,           // Reduced to 0.5MB to be friendly to DB storage
-    maxWidthOrHeight: 1280,   // Standard HD is sufficient for proofs
+    maxSizeMB: 0.2,           // Aggressively compress to 200KB for Firestore storage
+    maxWidthOrHeight: 1024,   // Resize to standard HD
     useWebWorker: true,
   };
 
@@ -32,11 +30,17 @@ export const optimizeFile = async (file: File): Promise<File> => {
 };
 
 /**
- * Uploads a file to Firebase Storage and returns the download URL.
+ * Converts a file to a Base64 string for storage directly in Firestore.
+ * NOTE: Firestore documents have a 1MB limit. We must compress images heavily.
  */
 export const uploadFile = async (file: File, path: string): Promise<string> => {
+  // 1. Optimize the image first to ensure it fits in Firestore
   const optimizedFile = await optimizeFile(file);
-  const storageRef = ref(storage, path);
-  await uploadBytes(storageRef, optimizedFile);
-  return await getDownloadURL(storageRef);
+  
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(optimizedFile);
+  });
 };

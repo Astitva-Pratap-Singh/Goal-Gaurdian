@@ -30,9 +30,9 @@ export const ScreenTimeUpload: React.FC<ScreenTimeUploadProps> = ({ user, onSubm
     if (hours >= 0 && file && user && user.googleId) {
       try {
         setIsUploading(true);
-        // Upload to Firebase Storage
-        const path = `screentime/${user.googleId}/${Date.now()}_${file.name}`;
-        const url = await uploadFile(file, path);
+        // Store Base64 directly in Firestore (no Storage bucket needed)
+        // uploadFile now returns the base64 string directly
+        const url = await uploadFile(file, '');
         
         onSubmit(hours, url);
         setHours(0);
