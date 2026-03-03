@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Icons } from './Icons';
 import { auth, googleProvider } from '../services/firebase';
-import { signInWithPopup, signInAnonymously } from 'firebase/auth';
+import { signInWithPopup, signInAnonymously, setPersistence, inMemoryPersistence, browserSessionPersistence } from 'firebase/auth';
 
 interface AuthProps {
   onLogin: (user: any) => void;
@@ -27,6 +27,26 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
       });
     } catch (err: any) {
       console.error("Auth Error", err);
+      
+      // Fallback for restricted environments (iframes) where IndexedDB/localStorage is blocked
+      if (err.code === 'auth/internal-error' || err.message?.includes('DOMException')) {
+          try {
+              console.warn("Attempting auth fallback to inMemoryPersistence...");
+              await setPersistence(auth, inMemoryPersistence);
+              const result = await signInWithPopup(auth, googleProvider);
+              const user = result.user;
+              onLogin({
+                name: user.displayName,
+                email: user.email,
+                avatarUrl: user.photoURL,
+                googleId: user.uid
+              });
+              return;
+          } catch (fallbackErr) {
+              console.error("Fallback Auth Error", fallbackErr);
+          }
+      }
+
       let msg = "Failed to sign in with Google.";
       if (err.code === 'auth/unauthorized-domain') {
         msg = "Domain not authorized. Add this URL to Firebase Console > Authentication > Settings > Authorized Domains.";
@@ -57,6 +77,26 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
       });
     } catch (err: any) {
       console.error("Anonymous Auth Error", err);
+
+      // Fallback for restricted environments
+      if (err.code === 'auth/internal-error' || err.message?.includes('DOMException')) {
+          try {
+              console.warn("Attempting anonymous auth fallback to inMemoryPersistence...");
+              await setPersistence(auth, inMemoryPersistence);
+              const result = await signInAnonymously(auth);
+              const user = result.user;
+              onLogin({
+                name: "Guest User",
+                email: "guest@goalguardian.ai",
+                avatarUrl: `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.uid}`,
+                googleId: user.uid
+              });
+              return;
+          } catch (fallbackErr) {
+              console.error("Fallback Anonymous Auth Error", fallbackErr);
+          }
+      }
+
       let msg = "Failed to enter Guest Mode.";
       if (err.code === 'auth/operation-not-allowed') {
         msg = "Anonymous Sign-In is not enabled. Please enable it in Firebase Console > Authentication > Sign-in method.";
