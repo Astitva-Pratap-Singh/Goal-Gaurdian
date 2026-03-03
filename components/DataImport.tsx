@@ -129,8 +129,8 @@ export const DataImport: React.FC<DataImportProps> = ({ user }) => {
       const collectionName = importType === 'tasks' ? 'tasks' : 'weeklyStats';
       const collectionRef = collection(db, collectionName);
 
-      // Process in chunks of 50 to avoid payload size limits
-      const CHUNK_SIZE = 50;
+      // Process in chunks of 10 to avoid payload size limits (conservative for large files/images)
+      const CHUNK_SIZE = 10;
       const chunks = [];
       for (let i = 0; i < previewData.length; i += CHUNK_SIZE) {
         chunks.push(previewData.slice(i, i + CHUNK_SIZE));

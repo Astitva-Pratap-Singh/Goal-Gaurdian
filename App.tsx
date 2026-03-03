@@ -20,7 +20,8 @@ import {
   query, 
   where, 
   orderBy, 
-  limit 
+  limit,
+  onSnapshot
 } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 
@@ -82,8 +83,8 @@ const App: React.FC = () => {
         };
         setUser(userData);
         setIsAuthenticated(true);
-        // Fetch data immediately after setting user
-        fetchUserData(firebaseUser.uid);
+        // Fetch initial profile data
+        fetchUserProfile(firebaseUser.uid);
       } else {
         // User is signed out
         setIsAuthenticated(false);
@@ -97,138 +98,189 @@ const App: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
-  const fetchUserData = async (googleId: string, backgroundSync = false) => {
-    if (!backgroundSync) {
-      setIsLoading(true);
-      setFetchError(null);
-    }
+  // Real-time Data Sync
+  useEffect(() => {
+    if (!user?.googleId) return;
+
+    const googleId = user.googleId;
     const currentWeekId = getCurrentWeekId();
 
-    try {
-      // Sequential execution for better error isolation
+    // 1. Tasks Listener
+    const tasksQuery = query(
+      collection(db, 'tasks'), 
+      where('userId', '==', googleId)
+    );
+
+    const unsubTasks = onSnapshot(tasksQuery, (snapshot) => {
+      const formattedTasks: Task[] = [];
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        formattedTasks.push({
+          id: doc.id,
+          title: data.title,
+          description: data.description,
+          type: data.type,
+          durationHours: data.durationHours,
+          createdAt: data.createdAt,
+          completedAt: data.completedAt,
+          status: data.status,
+          rejectionReason: data.rejectionReason,
+          proofImage: data.proofImage
+        });
+      });
       
-      // 1. Profile
-      let currentUserGoal = 80;
-      try {
-        const profileRef = doc(db, 'users', googleId);
-        const profileSnap = await getDoc(profileRef);
-        
-        if (profileSnap.exists()) {
-           const data = profileSnap.data();
-           currentUserGoal = data.weeklyGoalHours || 80;
-           if (user && user.weeklyGoalHours !== currentUserGoal) {
-               setUser(prev => prev ? { ...prev, weeklyGoalHours: currentUserGoal } : null);
-           }
-        } else {
-           // Profile doesn't exist, create it
-           await setDoc(profileRef, {
-               email: user?.email || '',
-               name: user?.name || 'User',
-               avatarUrl: user?.avatarUrl || '',
-               weeklyGoalHours: 80
-           });
-        }
-      } catch (err: any) {
-        console.error("Error fetching/creating profile:", err);
-        // Don't block loading on profile error, use defaults
-      }
+      // Sort in memory (descending by createdAt)
+      formattedTasks.sort((a, b) => {
+        const dateA = new Date(a.createdAt).getTime();
+        const dateB = new Date(b.createdAt).getTime();
+        return dateB - dateA;
+      });
+      
+      setTasks(formattedTasks);
+      setIsLoading(false);
 
-      // 2. Tasks
-      let formattedTasks: Task[] = [];
-      try {
-        // Simplified query to avoid composite index requirement on initial load
-        const tasksQuery = query(
-          collection(db, 'tasks'), 
-          where('userId', '==', googleId)
-        );
-        const tasksSnap = await getDocs(tasksQuery);
-        
-        tasksSnap.forEach((doc) => {
-          const data = doc.data();
-          formattedTasks.push({
-            id: doc.id,
-            title: data.title,
-            description: data.description,
-            type: data.type,
-            durationHours: data.durationHours,
-            createdAt: data.createdAt,
-            completedAt: data.completedAt,
-            status: data.status,
-            rejectionReason: data.rejectionReason,
-            proofImage: data.proofImage
-          });
-        });
-        // Sort in memory (descending by createdAt)
-        formattedTasks.sort((a, b) => {
-            const dateA = new Date(a.createdAt).getTime();
-            const dateB = new Date(b.createdAt).getTime();
-            return dateB - dateA;
-        });
-        setTasks(formattedTasks);
-      } catch (err: any) {
-        console.error("Error fetching tasks:", err);
-        // If tasks fail, we can still show the dashboard but with empty tasks
-        // However, this might be critical. Let's not throw yet.
-      }
+      // Continuous Sync: Ensure Weekly Stats matches verified tasks
+      // This handles task deletions, duration updates, and verifications automatically
+      const now = new Date();
+      const currentDay = now.getDay(); 
+      const distanceToMonday = currentDay === 0 ? 6 : currentDay - 1;
+      const monday = new Date(now);
+      monday.setDate(now.getDate() - distanceToMonday);
+      monday.setHours(0, 0, 0, 0);
+      const nextMonday = new Date(monday);
+      nextMonday.setDate(monday.getDate() + 7);
 
-      // 3. History (Weekly Stats excluding current week)
+      const actualCompletedHours = formattedTasks
+        .filter(t => {
+           if (t.status !== VerificationStatus.VERIFIED || !t.completedAt) return false;
+           const d = new Date(t.completedAt);
+           return d >= monday && d < nextMonday;
+        })
+        .reduce((acc, t) => acc + t.durationHours, 0);
+
+      // Check and update stats if out of sync
+      const statsRef = doc(db, 'weeklyStats', `${googleId}_${currentWeekId}`);
+      getDoc(statsRef).then(async (docSnap) => {
+          if (docSnap.exists()) {
+              const data = docSnap.data();
+              // Only update if difference is significant (floating point tolerance)
+              if (Math.abs((data.completedHours || 0) - actualCompletedHours) > 0.1) {
+                  console.log(`Syncing stats: DB=${data.completedHours}, Actual=${actualCompletedHours}`);
+                  const goal = data.goalHours || 80;
+                  const screenTime = data.screenTimeHours || 0;
+                  const newRating = await calculateWeeklyRating(actualCompletedHours, goal, screenTime);
+                  
+                  await updateDoc(statsRef, { 
+                      completedHours: actualCompletedHours,
+                      rating: newRating
+                  });
+              }
+          }
+      }).catch(err => console.error("Error syncing stats with tasks:", err));
+
+    }, (error) => {
+      console.error("Error syncing tasks:", error);
+      handleSyncError(error);
+    });
+
+    // 2. History & Current Stats Listener
+    // Note: We listen to all weeklyStats for the user to keep history and current stats in sync
+    const statsQuery = query(
+      collection(db, 'weeklyStats'),
+      where('userId', '==', googleId)
+    );
+
+    const unsubStats = onSnapshot(statsQuery, (snapshot) => {
       let formattedHistory: HistoryEntry[] = [];
       let currentStatsObj: WeeklyStats | null = null;
 
-      try {
-        // Note: If index is missing, this query will fail. 
-        // We wrap it in a try/catch or fall back to client-side filtering if needed.
-        const historyQuery = query(
-          collection(db, 'weeklyStats'),
-          where('userId', '==', googleId),
-          where('weekId', '!=', currentWeekId),
-          orderBy('weekId', 'asc')
-        );
-        
-        let allStatsSnap;
-        try {
-            allStatsSnap = await getDocs(historyQuery);
-        } catch (err: any) {
-            console.warn("History query failed (likely missing index), falling back to client-side filtering.", err);
-            // Fallback: Fetch all stats and filter in memory
-            const fallbackQuery = query(
-              collection(db, 'weeklyStats'),
-              where('userId', '==', googleId)
-            );
-            allStatsSnap = await getDocs(fallbackQuery);
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        const entry: HistoryEntry = {
+          id: doc.id,
+          weekId: data.weekId,
+          goalHours: data.goalHours,
+          completedHours: data.completedHours,
+          screenTimeHours: data.screenTimeHours,
+          rating: data.rating,
+          streakActive: data.streakActive,
+          startDate: data.startDate,
+          endDate: data.endDate
+        };
+
+        if (data.weekId === currentWeekId) {
+          currentStatsObj = entry;
+        } else {
+          formattedHistory.push(entry);
         }
+      });
 
-        allStatsSnap.forEach((doc) => {
-          const data = doc.data();
-          const entry: HistoryEntry = {
-            id: doc.id,
-            weekId: data.weekId,
-            goalHours: data.goalHours,
-            completedHours: data.completedHours,
-            screenTimeHours: data.screenTimeHours,
-            rating: data.rating,
-            streakActive: data.streakActive,
-            startDate: data.startDate,
-            endDate: data.endDate
-          };
+      // Sort history
+      formattedHistory.sort((a, b) => a.weekId.localeCompare(b.weekId));
+      setHistory(formattedHistory);
 
-          if (data.weekId === currentWeekId) {
-            currentStatsObj = entry;
-          } else {
-            formattedHistory.push(entry);
-          }
-        });
-        
-        // Sort history
-        formattedHistory.sort((a, b) => a.weekId.localeCompare(b.weekId));
-        setHistory(formattedHistory);
-      } catch (err: any) {
-        console.error("Error fetching history:", err);
-        // Non-critical, continue
+      // Handle Current Stats
+      if (currentStatsObj) {
+        setStats(currentStatsObj);
+      } else {
+        // If no current stats exist yet, we might need to create them
+        // This is handled by initializeCurrentWeek if needed, or we just wait
+        // For now, we'll rely on the profile fetch or manual creation trigger if missing
+        // But to be safe, we can init here if we have tasks loaded
+        initializeCurrentWeek(googleId, currentUserGoalRef.current);
       }
+    }, (error) => {
+      console.error("Error syncing stats:", error);
+      // Don't block on stats error
+    });
 
-      // 4. Process Current Stats & Self-Healing
-      try {
+    return () => {
+      unsubTasks();
+      unsubStats();
+    };
+  }, [user?.googleId]);
+
+  // Ref to keep track of goal for initialization without dependency loop
+  const currentUserGoalRef = React.useRef(80);
+
+  const fetchUserProfile = async (googleId: string) => {
+    setIsLoading(true);
+    setFetchError(null);
+    try {
+      const profileRef = doc(db, 'users', googleId);
+      const profileSnap = await getDoc(profileRef);
+      
+      if (profileSnap.exists()) {
+         const data = profileSnap.data();
+         const goal = data.weeklyGoalHours || 80;
+         currentUserGoalRef.current = goal;
+         setUser(prev => prev ? { ...prev, weeklyGoalHours: goal } : null);
+      } else {
+         // Profile doesn't exist, create it
+         await setDoc(profileRef, {
+             email: auth.currentUser?.email || '',
+             name: auth.currentUser?.displayName || 'User',
+             avatarUrl: auth.currentUser?.photoURL || '',
+             weeklyGoalHours: 80
+         });
+      }
+    } catch (err: any) {
+      console.error("Error fetching profile:", err);
+    }
+  };
+
+  const initializeCurrentWeek = async (googleId: string, goalHours: number) => {
+    // Only create if we are sure it doesn't exist (which we know from the snapshot being empty for this week)
+    // But we need to be careful not to infinite loop. 
+    // The snapshot listener handles updates. If we write, it will fire again.
+    
+    // We'll check existence once with a getDoc to be safe before writing
+    const currentWeekId = getCurrentWeekId();
+    const statsRef = doc(db, 'weeklyStats', `${googleId}_${currentWeekId}`);
+    
+    try {
+      const docSnap = await getDoc(statsRef);
+      if (!docSnap.exists()) {
         const now = new Date();
         const currentDay = now.getDay(); 
         const distanceToMonday = currentDay === 0 ? 6 : currentDay - 1;
@@ -238,82 +290,26 @@ const App: React.FC = () => {
         const nextMonday = new Date(monday);
         nextMonday.setDate(monday.getDate() + 7);
 
-        const actualCompletedHours = formattedTasks
-          .filter(t => {
-             if (t.status !== VerificationStatus.VERIFIED || !t.completedAt) return false;
-             const d = new Date(t.completedAt);
-             return d >= monday && d < nextMonday;
-          })
-          .reduce((acc, t) => acc + t.durationHours, 0);
-
-        if (currentStatsObj) {
-          // Self-heal check
-          if (Math.abs(currentStatsObj.completedHours - actualCompletedHours) > 0.1) {
-              currentStatsObj.completedHours = actualCompletedHours;
-              // Fire and forget update
-              const statsRef = doc(db, 'weeklyStats', `${googleId}_${currentWeekId}`);
-              updateDoc(statsRef, { completedHours: actualCompletedHours })
-                .catch(err => console.error("Background stat sync failed", err));
-          }
-          setStats(currentStatsObj);
-        } else {
-          // Create new week
-          currentStatsObj = {
-            weekId: currentWeekId,
-            startDate: monday.toLocaleDateString(),
-            endDate: new Date(nextMonday.getTime() - 1).toLocaleDateString(),
-            goalHours: currentUserGoal,
-            completedHours: actualCompletedHours,
-            screenTimeHours: 0,
-            rating: 0,
-            streakActive: true
-          };
-          setStats(currentStatsObj);
-          
-          const statsRef = doc(db, 'weeklyStats', `${googleId}_${currentWeekId}`);
-          setDoc(statsRef, {
-            userId: googleId,
-            ...currentStatsObj
-          }).catch(err => console.error("Error creating weekly stats", err));
-        }
-      } catch (err: any) {
-        console.error("Error processing current stats:", err);
-        throw new Error("Failed to initialize weekly stats.");
-      }
-
-      // --- STREAK CALCULATION LOGIC ---
-      try {
-        let streak = 0;
-        let checkWeekId = currentWeekId;
-
-        if (currentStatsObj && currentStatsObj.completedHours >= currentStatsObj.goalHours) {
-          streak++;
-          checkWeekId = getPreviousWeekId(checkWeekId);
-        } else {
-          checkWeekId = getPreviousWeekId(checkWeekId);
-        }
-
-        const reversedHistory = [...formattedHistory].sort((a, b) => b.weekId.localeCompare(a.weekId));
+        const newStats = {
+          weekId: currentWeekId,
+          startDate: monday.toLocaleDateString(),
+          endDate: new Date(nextMonday.getTime() - 1).toLocaleDateString(),
+          goalHours: goalHours,
+          completedHours: 0,
+          screenTimeHours: 0,
+          rating: 0,
+          streakActive: true,
+          userId: googleId
+        };
         
-        for (const entry of reversedHistory) {
-           if (entry.weekId !== checkWeekId) break; 
-           if (entry.completedHours >= entry.goalHours) {
-             streak++;
-             checkWeekId = getPreviousWeekId(checkWeekId);
-           } else {
-             break;
-           }
-        }
-
-        if (user && user.currentStreak !== streak) {
-            setUser(prev => prev ? { ...prev, currentStreak: streak } : null);
-        }
-      } catch (err: any) {
-        console.error("Error calculating streak:", err);
+        await setDoc(statsRef, newStats);
       }
+    } catch (err) {
+      console.error("Error initializing week:", err);
+    }
+  };
 
-    } catch (err: any) {
-        console.error("Critical error fetching user data:", err);
+  const handleSyncError = (err: any) => {
       if (err.code === 'unavailable') {
         const projectId = import.meta.env.VITE_FIREBASE_PROJECT_ID || 'unknown';
         setFetchError(`Connection Failed (Code: unavailable).
@@ -326,9 +322,14 @@ const App: React.FC = () => {
       } else {
         setFetchError(err.message || "Failed to connect to Firebase.");
       }
-    } finally {
-        if (!backgroundSync) setIsLoading(false);
-    }
+      setIsLoading(false);
+  };
+
+  // Legacy fetchUserData - kept empty or redirected to avoid breaking references if any
+  const fetchUserData = async (googleId: string, backgroundSync = false) => {
+     // No-op, handled by listeners now
+     // We can trigger a profile refresh if needed
+     fetchUserProfile(googleId);
   };
 
   const handleLogin = (userData: any) => {
