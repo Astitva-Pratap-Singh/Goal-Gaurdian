@@ -81,30 +81,15 @@ const App: React.FC = () => {
         };
         setUser(userData);
         setIsAuthenticated(true);
+        // Fetch data immediately after setting user
         fetchUserData(firebaseUser.uid);
       } else {
         // User is signed out
-        // Check local storage for demo user or persisted session if needed, 
-        // but Firebase auth is the source of truth.
-        const savedUser = localStorage.getItem('focusforge_user');
-        if (savedUser) {
-           // If we have a saved user but firebase says signed out, 
-           // it might be a demo user or expired session.
-           // For now, let's trust firebase auth state mostly, 
-           // but allow demo user bypass if needed.
-           const parsedUser = JSON.parse(savedUser);
-           if (parsedUser.googleId === 'dev-123') {
-             setUser(parsedUser);
-             setIsAuthenticated(true);
-             fetchUserData(parsedUser.googleId);
-           } else {
-             setIsAuthenticated(false);
-             setUser(null);
-           }
-        } else {
-          setIsAuthenticated(false);
-          setUser(null);
-        }
+        setIsAuthenticated(false);
+        setUser(null);
+        setStats(null);
+        setTasks([]);
+        setHistory([]);
       }
     });
 
@@ -134,25 +119,31 @@ const App: React.FC = () => {
       const tasksSnapPromise = getDocs(tasksQuery);
 
       // 3. History (Weekly Stats excluding current week)
+      // Note: If index is missing, this query will fail. 
+      // We wrap it in a try/catch or fall back to client-side filtering if needed.
       const historyQuery = query(
         collection(db, 'weeklyStats'),
         where('userId', '==', googleId),
         where('weekId', '!=', currentWeekId),
         orderBy('weekId', 'asc')
       );
-      // Note: Firestore requires composite index for this query. 
-      // If it fails, we might need to fetch all and filter in memory or create index.
-      // Fallback: fetch all stats for user and filter.
-      const allStatsQuery = query(
-        collection(db, 'weeklyStats'),
-        where('userId', '==', googleId)
-      );
-      const allStatsSnapPromise = getDocs(allStatsQuery);
+      
+      let allStatsSnap;
+      try {
+          allStatsSnap = await getDocs(historyQuery);
+      } catch (err: any) {
+          console.warn("History query failed (likely missing index), falling back to client-side filtering.", err);
+          // Fallback: Fetch all stats and filter in memory
+          const fallbackQuery = query(
+            collection(db, 'weeklyStats'),
+            where('userId', '==', googleId)
+          );
+          allStatsSnap = await getDocs(fallbackQuery);
+      }
 
-      const [profileSnap, tasksSnap, allStatsSnap] = await Promise.all([
+      const [profileSnap, tasksSnap] = await Promise.all([
         profileSnapPromise,
-        tasksSnapPromise,
-        allStatsSnapPromise
+        tasksSnapPromise
       ]);
 
       // 1. Process Profile
@@ -161,20 +152,17 @@ const App: React.FC = () => {
          const data = profileSnap.data();
          currentUserGoal = data.weeklyGoalHours || 80;
          if (user && user.weeklyGoalHours !== currentUserGoal) {
-             const updatedUser = { ...user, weeklyGoalHours: currentUserGoal };
-             setUser(updatedUser);
-             localStorage.setItem('focusforge_user', JSON.stringify(updatedUser));
+             // Update local user state if goal differs
+             setUser(prev => prev ? { ...prev, weeklyGoalHours: currentUserGoal } : null);
          }
       } else {
          // Profile doesn't exist, create it
-         if (user) {
-             await setDoc(profileRef, {
-                 email: user.email,
-                 name: user.name,
-                 avatarUrl: user.avatarUrl,
-                 weeklyGoalHours: 80
-             });
-         }
+         await setDoc(profileRef, {
+             email: user?.email || '',
+             name: user?.name || 'User',
+             avatarUrl: user?.avatarUrl || '',
+             weeklyGoalHours: 80
+         });
       }
 
       // 2. Process Tasks
@@ -191,11 +179,9 @@ const App: React.FC = () => {
           completedAt: data.completedAt,
           status: data.status,
           rejectionReason: data.rejectionReason,
-          proofImage: data.proofImage // Firestore stores URL directly usually
+          proofImage: data.proofImage
         });
       });
-      // Sort in memory just in case
-      formattedTasks.sort((a, b) => b.createdAt - a.createdAt);
       setTasks(formattedTasks);
 
       // 3. Process Stats & History
@@ -300,12 +286,7 @@ const App: React.FC = () => {
       }
 
       if (user && user.currentStreak !== streak) {
-          setUser(prev => {
-              if (!prev) return null;
-              const updated = { ...prev, currentStreak: streak };
-              localStorage.setItem('focusforge_user', JSON.stringify(updated));
-              return updated;
-          });
+          setUser(prev => prev ? { ...prev, currentStreak: streak } : null);
       }
 
     } catch (err: any) {
@@ -316,43 +297,9 @@ const App: React.FC = () => {
     }
   };
 
-  const handleLogin = async (userData: any) => {
-    // This is mainly used by the Demo login now, 
-    // real Google login is handled by onAuthStateChanged
-    const newUser: UserProfile = {
-      name: userData.name,
-      email: userData.email,
-      avatarUrl: userData.avatarUrl,
-      googleId: userData.googleId,
-      weeklyGoalHours: 80, 
-      currentStreak: 0 
-    };
-    setUser(newUser);
-    localStorage.setItem('focusforge_user', JSON.stringify(newUser));
-    setIsAuthenticated(true);
-    
-    // Create profile if not exists
-    const profileRef = doc(db, 'users', userData.googleId);
-    try {
-      const docSnap = await getDoc(profileRef);
-      if (!docSnap.exists()) {
-        await setDoc(profileRef, {
-            email: userData.email,
-            name: userData.name,
-            avatarUrl: userData.avatarUrl,
-            weeklyGoalHours: 80
-        });
-      } else {
-        const data = docSnap.data();
-        if (data.weeklyGoalHours !== 80) {
-           setUser(prev => prev ? { ...prev, weeklyGoalHours: data.weeklyGoalHours } : prev);
-        }
-      }
-    } catch (err) {
-      console.error("Error checking profile:", err);
-    }
-
-    fetchUserData(userData.googleId);
+  const handleLogin = (userData: any) => {
+     // This is just a placeholder now as onAuthStateChanged handles the real logic
+     console.log("Login triggered", userData);
   };
 
   const handleLogout = () => {
