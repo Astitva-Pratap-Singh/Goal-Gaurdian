@@ -313,7 +313,11 @@ const App: React.FC = () => {
 
     } catch (err: any) {
         console.error("Critical error fetching user data:", err);
+      if (err.code === 'unavailable') {
+        setFetchError("Network or Configuration Error: Unable to connect to the database. Please check your internet connection and verify that your Firebase Project ID is correct.");
+      } else {
         setFetchError(err.message || "Failed to connect to Firebase.");
+      }
     } finally {
         if (!backgroundSync) setIsLoading(false);
     }
