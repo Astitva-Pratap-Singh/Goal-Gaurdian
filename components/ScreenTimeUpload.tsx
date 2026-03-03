@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Icons } from './Icons';
 import { UserProfile } from '../types';
-import { uploadToR2 } from '../services/storage';
+import { uploadFile } from '../services/storage';
 
 interface ScreenTimeUploadProps {
   user: UserProfile;
@@ -30,8 +30,9 @@ export const ScreenTimeUpload: React.FC<ScreenTimeUploadProps> = ({ user, onSubm
     if (hours >= 0 && file && user && user.googleId) {
       try {
         setIsUploading(true);
-        // Upload simulation (Stores Base64)
-        const url = await uploadToR2(file, user.googleId, 'screentime');
+        // Upload to Firebase Storage
+        const path = `screentime/${user.googleId}/${Date.now()}_${file.name}`;
+        const url = await uploadFile(file, path);
         
         onSubmit(hours, url);
         setHours(0);

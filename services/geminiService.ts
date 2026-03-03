@@ -1,17 +1,15 @@
 import { GoogleGenAI } from "@google/genai";
 import { Task } from "../types";
 
-// Helper to safely get Env Vars in Vite or Standard environments
+// Vite requires static access to import.meta.env for production builds
 const getEnv = (key: string) => {
   // @ts-ignore
   if (typeof import.meta !== 'undefined' && import.meta.env) {
-    // @ts-ignore
-    return import.meta.env[`VITE_${key}`] || import.meta.env[key];
+    if (key === 'API_KEY') return import.meta.env.VITE_API_KEY || import.meta.env.API_KEY;
   }
   // @ts-ignore
   if (typeof process !== 'undefined' && process.env) {
-    // @ts-ignore
-    return process.env[`REACT_APP_${key}`] || process.env[key];
+    if (key === 'API_KEY') return process.env.REACT_APP_API_KEY || process.env.API_KEY;
   }
   return "";
 };

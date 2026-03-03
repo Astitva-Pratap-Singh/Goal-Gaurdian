@@ -1,3 +1,5 @@
+import { storage } from './firebase';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import imageCompression from 'browser-image-compression';
 
 /**
@@ -30,18 +32,11 @@ export const optimizeFile = async (file: File): Promise<File> => {
 };
 
 /**
- * Simulates an upload by converting the file to a Base64 Data URI.
- * This removes the dependency on external storage buckets (R2/S3) for the demo,
- * allowing the app to function with just Supabase database storage.
+ * Uploads a file to Firebase Storage and returns the download URL.
  */
-export const uploadToR2 = async (file: File, userId: string, folder: 'tasks' | 'screentime') => {
-  // Optimize first to keep base64 string size manageable
+export const uploadFile = async (file: File, path: string): Promise<string> => {
   const optimizedFile = await optimizeFile(file);
-  
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(optimizedFile);
-  });
+  const storageRef = ref(storage, path);
+  await uploadBytes(storageRef, optimizedFile);
+  return await getDownloadURL(storageRef);
 };

@@ -1,72 +1,27 @@
 import React, { useEffect } from 'react';
 import { Icons } from './Icons';
-import { jwtDecode } from "jwt-decode";
+import { auth, googleProvider } from '../services/firebase';
+import { signInWithPopup } from 'firebase/auth';
 
 interface AuthProps {
   onLogin: (user: any) => void;
 }
 
-declare global {
-  interface Window {
-    google: any;
-  }
-}
-
-// Helper to safely get Env Vars in Vite or Standard environments
-const getEnv = (key: string) => {
-  // @ts-ignore
-  if (typeof import.meta !== 'undefined' && import.meta.env) {
-    // @ts-ignore
-    return import.meta.env[`VITE_${key}`] || import.meta.env[key];
-  }
-  // @ts-ignore
-  if (typeof process !== 'undefined' && process.env) {
-    // @ts-ignore
-    return process.env[`REACT_APP_${key}`] || process.env[key];
-  }
-  return "";
-};
-
-// Get Client ID from environment variable or fallback to a placeholder
-const RAW_CLIENT_ID = getEnv("GOOGLE_CLIENT_ID");
-const GOOGLE_CLIENT_ID = RAW_CLIENT_ID || "YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com"; 
-
 export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
   
-  useEffect(() => {
-    /* Initialize Google Identity Services */
-    if (window.google) {
-      window.google.accounts.id.initialize({
-        client_id: GOOGLE_CLIENT_ID,
-        callback: handleCredentialResponse,
-        auto_select: false,
-        theme: "filled_black"
-      });
-
-      // Only render the button if we have a valid Client ID (not the placeholder)
-      // Otherwise, the user will rely on the Demo Mode button
-      const isConfigured = !GOOGLE_CLIENT_ID.includes("YOUR_GOOGLE_CLIENT_ID");
-      
-      if (isConfigured) {
-        window.google.accounts.id.renderButton(
-          document.getElementById("googleSignInDiv"),
-          { theme: "outline", size: "large", width: "100%", text: "continue_with" }
-        );
-      }
-    }
-  }, []);
-
-  const handleCredentialResponse = (response: any) => {
+  const handleGoogleLogin = async () => {
     try {
-      const decoded: any = jwtDecode(response.credential);
+      const result = await signInWithPopup(auth, googleProvider);
+      const user = result.user;
       onLogin({
-        name: decoded.name,
-        email: decoded.email,
-        avatarUrl: decoded.picture,
-        googleId: decoded.sub
+        name: user.displayName,
+        email: user.email,
+        avatarUrl: user.photoURL,
+        googleId: user.uid // Using Firebase UID as googleId
       });
     } catch (error) {
       console.error("Auth Error", error);
+      alert("Failed to sign in with Google");
     }
   };
 
@@ -79,8 +34,6 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
       googleId: "dev-123"
     });
   };
-
-  const isConfigured = !GOOGLE_CLIENT_ID.includes("YOUR_GOOGLE_CLIENT_ID");
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#020617] p-4 relative overflow-hidden">
@@ -100,15 +53,14 @@ export const Auth: React.FC<AuthProps> = ({ onLogin }) => {
 
         <div className="space-y-6">
           <div className="flex flex-col gap-4">
-             {/* The actual Google Button Container */}
-             <div id="googleSignInDiv" className="w-full flex justify-center min-h-[40px]">
-                {!isConfigured && (
-                  <div className="text-amber-500 text-sm bg-amber-950/30 p-3 rounded border border-amber-900/50 w-full text-center">
-                    Google Auth not configured. <br/>
-                    Set VITE_GOOGLE_CLIENT_ID in Vercel Env Vars.
-                  </div>
-                )}
-             </div>
+             {/* Firebase Google Button */}
+             <button 
+                onClick={handleGoogleLogin}
+                className="w-full bg-white hover:bg-slate-100 text-slate-900 font-medium py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors"
+            >
+                <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5" alt="Google" />
+                Continue with Google
+            </button>
              
              <div className="relative flex py-2 items-center">
                 <div className="flex-grow border-t border-slate-800"></div>

@@ -8,7 +8,20 @@ import { Auth } from './components/Auth';
 import { Icons } from './components/Icons';
 import { UserProfile, WeeklyStats, Task, HistoryEntry, VerificationStatus } from './types';
 import { calculateWeeklyRating } from './services/geminiService';
-import { supabase } from './services/supabase';
+import { db, auth } from './services/firebase';
+import { 
+  collection, 
+  doc, 
+  getDoc, 
+  getDocs, 
+  setDoc, 
+  updateDoc, 
+  query, 
+  where, 
+  orderBy, 
+  limit 
+} from 'firebase/firestore';
+import { onAuthStateChanged } from 'firebase/auth';
 
 // --- DATE HELPERS ---
 
@@ -55,13 +68,47 @@ const App: React.FC = () => {
 
   // Check for existing session
   useEffect(() => {
-    const savedUser = localStorage.getItem('focusforge_user');
-    if (savedUser) {
-      const parsedUser = JSON.parse(savedUser);
-      setUser(parsedUser);
-      setIsAuthenticated(true);
-      fetchUserData(parsedUser.googleId);
-    }
+    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+      if (firebaseUser) {
+        // User is signed in
+        const userData = {
+          name: firebaseUser.displayName || 'User',
+          email: firebaseUser.email || '',
+          avatarUrl: firebaseUser.photoURL || '',
+          googleId: firebaseUser.uid,
+          weeklyGoalHours: 80, // Default, will be overwritten by DB
+          currentStreak: 0
+        };
+        setUser(userData);
+        setIsAuthenticated(true);
+        fetchUserData(firebaseUser.uid);
+      } else {
+        // User is signed out
+        // Check local storage for demo user or persisted session if needed, 
+        // but Firebase auth is the source of truth.
+        const savedUser = localStorage.getItem('focusforge_user');
+        if (savedUser) {
+           // If we have a saved user but firebase says signed out, 
+           // it might be a demo user or expired session.
+           // For now, let's trust firebase auth state mostly, 
+           // but allow demo user bypass if needed.
+           const parsedUser = JSON.parse(savedUser);
+           if (parsedUser.googleId === 'dev-123') {
+             setUser(parsedUser);
+             setIsAuthenticated(true);
+             fetchUserData(parsedUser.googleId);
+           } else {
+             setIsAuthenticated(false);
+             setUser(null);
+           }
+        } else {
+          setIsAuthenticated(false);
+          setUser(null);
+        }
+      }
+    });
+
+    return () => unsubscribe();
   }, []);
 
   const fetchUserData = async (googleId: string, backgroundSync = false) => {
@@ -73,96 +120,112 @@ const App: React.FC = () => {
 
     try {
       // Parallel execution for faster load times
-      // CRITICAL OPTIMIZATION: Exclude 'proof_image' from tasks fetch. It is huge (Base64).
-      // We load it on-demand in TaskList.
-      const [profileRes, tasksRes, historyRes, currentStatsRes] = await Promise.all([
-        supabase.from('profiles').select('*').eq('google_id', googleId).single(),
-        supabase
-          .from('tasks')
-          .select('id, title, description, type, duration_hours, created_at, completed_at, status, rejection_reason') // Explicitly select columns to avoid downloading images
-          .eq('user_id', googleId)
-          .order('created_at', { ascending: false }), 
-        supabase.from('weekly_stats').select('*').eq('user_id', googleId).neq('week_id', currentWeekId).order('week_id', { ascending: true }),
-        supabase.from('weekly_stats').select('*').eq('user_id', googleId).eq('week_id', currentWeekId).single()
-      ]);
+      
+      // 1. Profile
+      const profileRef = doc(db, 'users', googleId);
+      const profileSnapPromise = getDoc(profileRef);
 
-      // Check for missing tables or other critical DB errors
-      const errors = [profileRes.error, tasksRes.error, historyRes.error, currentStatsRes.error];
-      for (const err of errors) {
-        if (err && err.code === '42P01') {
-          throw new Error("Database tables are missing. Please run the SQL schema to recreate them.");
-        }
-        if (err && err.message && (err.message.includes('Load failed') || err.message.includes('Failed to fetch'))) {
-          throw new Error("Network error: Could not connect to Supabase. If you are on a mobile device, ensure SUPABASE_URL uses your computer's local IP address (e.g., 192.168.x.x) instead of localhost.");
-        }
-      }
-      if (profileRes.error && profileRes.error.code !== 'PGRST116') {
-        throw new Error(profileRes.error.message);
-      }
+      // 2. Tasks
+      const tasksQuery = query(
+        collection(db, 'tasks'), 
+        where('userId', '==', googleId),
+        orderBy('createdAt', 'desc')
+      );
+      const tasksSnapPromise = getDocs(tasksQuery);
+
+      // 3. History (Weekly Stats excluding current week)
+      const historyQuery = query(
+        collection(db, 'weeklyStats'),
+        where('userId', '==', googleId),
+        where('weekId', '!=', currentWeekId),
+        orderBy('weekId', 'asc')
+      );
+      // Note: Firestore requires composite index for this query. 
+      // If it fails, we might need to fetch all and filter in memory or create index.
+      // Fallback: fetch all stats for user and filter.
+      const allStatsQuery = query(
+        collection(db, 'weeklyStats'),
+        where('userId', '==', googleId)
+      );
+      const allStatsSnapPromise = getDocs(allStatsQuery);
+
+      const [profileSnap, tasksSnap, allStatsSnap] = await Promise.all([
+        profileSnapPromise,
+        tasksSnapPromise,
+        allStatsSnapPromise
+      ]);
 
       // 1. Process Profile
       let currentUserGoal = 80;
-      if (profileRes.data && user) {
-         currentUserGoal = profileRes.data.weekly_goal_hours || 80;
-         if (user.weeklyGoalHours !== currentUserGoal) {
+      if (profileSnap.exists()) {
+         const data = profileSnap.data();
+         currentUserGoal = data.weeklyGoalHours || 80;
+         if (user && user.weeklyGoalHours !== currentUserGoal) {
              const updatedUser = { ...user, weeklyGoalHours: currentUserGoal };
              setUser(updatedUser);
              localStorage.setItem('focusforge_user', JSON.stringify(updatedUser));
          }
-      } else if (profileRes.error && profileRes.error.code === 'PGRST116') {
-         // Profile doesn't exist (e.g. DB was wiped but localStorage remained)
-         // We can recreate it using the data from localStorage
-         const savedUser = localStorage.getItem('focusforge_user');
-         if (savedUser) {
-             const parsedUser = JSON.parse(savedUser);
-             await supabase.from('profiles').upsert({
-                 google_id: googleId,
-                 email: parsedUser.email,
-                 name: parsedUser.name,
-                 avatar_url: parsedUser.avatarUrl,
-                 weekly_goal_hours: parsedUser.weeklyGoalHours || 80
-             }, { onConflict: 'google_id' });
-             currentUserGoal = parsedUser.weeklyGoalHours || 80;
+      } else {
+         // Profile doesn't exist, create it
+         if (user) {
+             await setDoc(profileRef, {
+                 email: user.email,
+                 name: user.name,
+                 avatarUrl: user.avatarUrl,
+                 weeklyGoalHours: 80
+             });
          }
       }
 
       // 2. Process Tasks
       let formattedTasks: Task[] = [];
-      if (tasksRes.data) {
-        formattedTasks = tasksRes.data.map((t: any) => ({
-          id: t.id,
-          title: t.title,
-          description: t.description,
-          type: t.type,
-          durationHours: t.duration_hours,
-          // Convert to timestamp numbers for reliable sorting/math
-          createdAt: new Date(t.completed_at || t.created_at).getTime(), 
-          completedAt: t.completed_at ? new Date(t.completed_at).getTime() : undefined,
-          status: t.status,
-          // proofImage is undefined here to save bandwidth. Loaded lazy.
-          rejectionReason: t.rejection_reason
-        }));
-        // Sort in memory to ensure order
-        formattedTasks.sort((a, b) => b.createdAt - a.createdAt);
-        setTasks(formattedTasks);
-      }
+      tasksSnap.forEach((doc) => {
+        const data = doc.data();
+        formattedTasks.push({
+          id: doc.id,
+          title: data.title,
+          description: data.description,
+          type: data.type,
+          durationHours: data.durationHours,
+          createdAt: data.createdAt,
+          completedAt: data.completedAt,
+          status: data.status,
+          rejectionReason: data.rejectionReason,
+          proofImage: data.proofImage // Firestore stores URL directly usually
+        });
+      });
+      // Sort in memory just in case
+      formattedTasks.sort((a, b) => b.createdAt - a.createdAt);
+      setTasks(formattedTasks);
 
-      // 3. Process History
+      // 3. Process Stats & History
       let formattedHistory: HistoryEntry[] = [];
-      if (historyRes.data) {
-        formattedHistory = historyRes.data.map((h: any) => ({
-          id: h.id,
-          weekId: h.week_id,
-          goalHours: h.goal_hours,
-          completedHours: h.completed_hours,
-          screenTimeHours: h.screen_time_hours,
-          rating: h.rating,
-          streakActive: h.streak_active,
-          startDate: h.start_date,
-          endDate: h.end_date
-        }));
-        setHistory(formattedHistory);
-      }
+      let currentStatsObj: WeeklyStats | null = null;
+
+      allStatsSnap.forEach((doc) => {
+        const data = doc.data();
+        const entry: HistoryEntry = {
+          id: doc.id,
+          weekId: data.weekId,
+          goalHours: data.goalHours,
+          completedHours: data.completedHours,
+          screenTimeHours: data.screenTimeHours,
+          rating: data.rating,
+          streakActive: data.streakActive,
+          startDate: data.startDate,
+          endDate: data.endDate
+        };
+
+        if (data.weekId === currentWeekId) {
+          currentStatsObj = entry;
+        } else {
+          formattedHistory.push(entry);
+        }
+      });
+      
+      // Sort history
+      formattedHistory.sort((a, b) => a.weekId.localeCompare(b.weekId));
+      setHistory(formattedHistory);
 
       // 4. Process Current Stats & Self-Healing
       const now = new Date();
@@ -182,30 +245,14 @@ const App: React.FC = () => {
         })
         .reduce((acc, t) => acc + t.durationHours, 0);
 
-      const statsData = currentStatsRes.data;
-      let currentStatsObj: WeeklyStats;
-
-      if (statsData) {
-        currentStatsObj = {
-          weekId: statsData.week_id,
-          goalHours: statsData.goal_hours,
-          completedHours: statsData.completed_hours,
-          screenTimeHours: statsData.screen_time_hours,
-          rating: statsData.rating,
-          streakActive: statsData.streak_active,
-          startDate: statsData.start_date,
-          endDate: statsData.end_date
-        };
-
-        // Self-heal check (only if significant difference)
-        if (Math.abs(statsData.completed_hours - actualCompletedHours) > 0.1) {
+      if (currentStatsObj) {
+        // Self-heal check
+        if (Math.abs(currentStatsObj.completedHours - actualCompletedHours) > 0.1) {
             currentStatsObj.completedHours = actualCompletedHours;
             // Fire and forget update
-            supabase.from('weekly_stats')
-              .update({ completed_hours: actualCompletedHours })
-              .eq('week_id', currentWeekId)
-              .eq('user_id', googleId)
-              .then(({ error }) => { if (error) console.error("Background stat sync failed", error); });
+            const statsRef = doc(db, 'weeklyStats', `${googleId}_${currentWeekId}`);
+            updateDoc(statsRef, { completedHours: actualCompletedHours })
+              .catch(err => console.error("Background stat sync failed", err));
         }
         setStats(currentStatsObj);
       } else {
@@ -221,14 +268,12 @@ const App: React.FC = () => {
           streakActive: true
         };
         setStats(currentStatsObj);
-        supabase.from('weekly_stats').insert({
-          user_id: googleId,
-          week_id: currentStatsObj.weekId,
-          start_date: currentStatsObj.startDate,
-          end_date: currentStatsObj.endDate,
-          goal_hours: currentStatsObj.goalHours,
-          completed_hours: currentStatsObj.completedHours
-        }).then(({ error }) => { if (error) console.error("Error creating weekly stats", error); });
+        
+        const statsRef = doc(db, 'weeklyStats', `${googleId}_${currentWeekId}`);
+        setDoc(statsRef, {
+          userId: googleId,
+          ...currentStatsObj
+        }).catch(err => console.error("Error creating weekly stats", err));
       }
 
       // --- STREAK CALCULATION LOGIC ---
@@ -265,13 +310,15 @@ const App: React.FC = () => {
 
     } catch (err: any) {
         console.error("Critical error fetching user data:", err);
-        setFetchError(err.message || "Failed to connect to Supabase. Is the container running?");
+        setFetchError(err.message || "Failed to connect to Firebase.");
     } finally {
         if (!backgroundSync) setIsLoading(false);
     }
   };
 
   const handleLogin = async (userData: any) => {
+    // This is mainly used by the Demo login now, 
+    // real Google login is handled by onAuthStateChanged
     const newUser: UserProfile = {
       name: userData.name,
       email: userData.email,
@@ -284,28 +331,32 @@ const App: React.FC = () => {
     localStorage.setItem('focusforge_user', JSON.stringify(newUser));
     setIsAuthenticated(true);
     
+    // Create profile if not exists
+    const profileRef = doc(db, 'users', userData.googleId);
     try {
-      // Await profile upsert to prevent foreign key errors in fetchUserData
-      const { data } = await supabase.from('profiles').select('weekly_goal_hours').eq('google_id', userData.googleId).single();
-      const userGoal = data?.weekly_goal_hours || 80;
-      if (userGoal !== 80) {
-          setUser(prev => prev ? { ...prev, weeklyGoalHours: userGoal } : prev);
+      const docSnap = await getDoc(profileRef);
+      if (!docSnap.exists()) {
+        await setDoc(profileRef, {
+            email: userData.email,
+            name: userData.name,
+            avatarUrl: userData.avatarUrl,
+            weeklyGoalHours: 80
+        });
+      } else {
+        const data = docSnap.data();
+        if (data.weeklyGoalHours !== 80) {
+           setUser(prev => prev ? { ...prev, weeklyGoalHours: data.weeklyGoalHours } : prev);
+        }
       }
-      await supabase.from('profiles').upsert({
-          google_id: userData.googleId,
-          email: userData.email,
-          name: userData.name,
-          avatar_url: userData.avatarUrl,
-          weekly_goal_hours: userGoal 
-      }, { onConflict: 'google_id' });
     } catch (err) {
-      console.error("Error upserting profile:", err);
+      console.error("Error checking profile:", err);
     }
 
     fetchUserData(userData.googleId);
   };
 
   const handleLogout = () => {
+    auth.signOut();
     localStorage.removeItem('focusforge_user');
     setUser(null);
     setStats(null);
@@ -321,15 +372,14 @@ const App: React.FC = () => {
     setUser(updatedUser);
     localStorage.setItem('focusforge_user', JSON.stringify(updatedUser));
     
-    // Optimistic UI updates, no need to wait or refetch
-    await supabase.from('profiles').update({ weekly_goal_hours: newGoal }).eq('google_id', user.googleId);
+    // Optimistic UI updates
+    const profileRef = doc(db, 'users', user.googleId);
+    await updateDoc(profileRef, { weeklyGoalHours: newGoal });
     
     if (stats) {
         setStats({ ...stats, goalHours: newGoal });
-        await supabase.from('weekly_stats')
-            .update({ goal_hours: newGoal })
-            .eq('user_id', user.googleId)
-            .eq('week_id', stats.weekId);
+        const statsRef = doc(db, 'weeklyStats', `${user.googleId}_${stats.weekId}`);
+        await updateDoc(statsRef, { goalHours: newGoal });
     }
   };
 
@@ -347,14 +397,8 @@ const App: React.FC = () => {
      setStats(prev => prev ? ({ ...prev, completedHours: newCompleted, rating: newRating }) : null);
      
      // Background DB Update
-     await supabase
-       .from('weekly_stats')
-       .update({ completed_hours: newCompleted, rating: newRating })
-       .eq('user_id', user.googleId)
-       .eq('week_id', stats.weekId);
-       
-     // REMOVED: fetchUserData call. Local state is already accurate.
-     // This prevents the "way too time taking" sync after every task.
+     const statsRef = doc(db, 'weeklyStats', `${user.googleId}_${stats.weekId}`);
+     await updateDoc(statsRef, { completedHours: newCompleted, rating: newRating });
   };
 
   const handleScreenTimeSubmit = async (hours: number, image: string) => {
@@ -369,11 +413,8 @@ const App: React.FC = () => {
 
      setStats(prev => prev ? ({ ...prev, screenTimeHours: newScreenTime, rating: newRating }) : null);
 
-     await supabase
-       .from('weekly_stats')
-       .update({ screen_time_hours: newScreenTime, rating: newRating })
-       .eq('user_id', user.googleId)
-       .eq('week_id', stats.weekId);
+     const statsRef = doc(db, 'weeklyStats', `${user.googleId}_${stats.weekId}`);
+     await updateDoc(statsRef, { screenTimeHours: newScreenTime, rating: newRating });
   };
 
   if (!isAuthenticated || !user) {

@@ -2,8 +2,9 @@ import React, { useState, useRef, useMemo } from 'react';
 import { Icons } from './Icons';
 import { Task, TaskType, VerificationStatus, UserProfile } from '../types';
 import { verifyTaskProof } from '../services/geminiService';
-import { supabase } from '../services/supabase';
-import { optimizeFile } from '../services/storage';
+import { db } from '../services/firebase';
+import { collection, addDoc, updateDoc, deleteDoc, doc, getDoc } from 'firebase/firestore';
+import { optimizeFile, uploadFile } from '../services/storage';
 
 interface TaskListProps {
   tasks: Task[];
@@ -119,14 +120,15 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
         setIsModalOpen(false);
         resetForm();
 
-        const { error } = await supabase.from('tasks').update({
+        const taskRef = doc(db, 'tasks', editingTaskId);
+        try {
+          await updateDoc(taskRef, {
             title: newTaskTitle,
             description: newTaskDesc,
             type: newTaskType,
-            duration_hours: newTaskDuration
-        }).eq('id', editingTaskId);
-
-        if (error) {
+            durationHours: newTaskDuration
+          });
+        } catch (error) {
             console.error("Error updating task", error);
             alert("Failed to update task.");
         }
@@ -150,21 +152,20 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
         resetForm();
 
         // DB Insert
-        const { data, error } = await supabase.from('tasks').insert({
-            user_id: user.googleId,
+        try {
+          const docRef = await addDoc(collection(db, 'tasks'), {
+            userId: user.googleId,
             title: newTask.title,
             description: newTask.description,
             type: newTask.type,
-            duration_hours: newTask.durationHours,
+            durationHours: newTask.durationHours,
             status: newTask.status,
-            created_at: newTask.createdAt // Passing number, supabase handles timestamp conversion if column is timestamp/timestamptz
-        }).select();
+            createdAt: newTask.createdAt
+          });
 
-        // Update with real ID from DB if successful
-        if (data && data[0]) {
-            setTasks(prev => prev.map(t => t.id === tempId ? { ...t, id: data[0].id } : t));
-        }
-        if (error) {
+          // Update with real ID from DB if successful
+          setTasks(prev => prev.map(t => t.id === tempId ? { ...t, id: docRef.id } : t));
+        } catch (error: any) {
             console.error("Error creating task", error);
             setTasks(prev => prev.filter(t => t.id !== tempId));
             alert(`Failed to save task to database: ${error.message}`);
@@ -186,9 +187,9 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
     }
 
     setTasks(prev => prev.filter(t => t.id !== taskId));
-    const { error } = await supabase.from('tasks').delete().eq('id', taskId);
-
-    if (error) {
+    try {
+      await deleteDoc(doc(db, 'tasks', taskId));
+    } catch (error) {
       console.error("Error deleting task", error);
       alert("Failed to delete task from server.");
     }
@@ -196,7 +197,7 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
 
   // --- LAZY LOADING PROOF ---
   const handleViewProof = async (task: Task) => {
-    // If we already have the base64, just show it
+    // If we already have the proof URL, just show it
     if (task.proofImage) {
       setPreviewProof(task.proofImage);
       return;
@@ -204,20 +205,20 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
 
     try {
       setLoadingProofId(task.id);
-      const { data, error } = await supabase
-        .from('tasks')
-        .select('proof_image')
-        .eq('id', task.id)
-        .single();
+      const taskRef = doc(db, 'tasks', task.id);
+      const docSnap = await getDoc(taskRef);
 
-      if (error) throw error;
-      
-      if (data && data.proof_image) {
-        // Update local task state to cache the image so we don't fetch again
-        setTasks(prev => prev.map(t => t.id === task.id ? { ...t, proofImage: data.proof_image } : t));
-        setPreviewProof(data.proof_image);
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.proofImage) {
+          // Update local task state to cache the image so we don't fetch again
+          setTasks(prev => prev.map(t => t.id === task.id ? { ...t, proofImage: data.proofImage } : t));
+          setPreviewProof(data.proofImage);
+        } else {
+          alert("No proof image found for this task.");
+        }
       } else {
-        alert("No proof image found for this task.");
+        alert("Task not found.");
       }
     } catch (err) {
       console.error("Error fetching proof:", err);
@@ -251,7 +252,7 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
       reader.onloadend = async () => {
         const base64String = reader.result as string;
         
-        // 2. Verify with Optimized Image
+        // 2. Verify with Optimized Image (Gemini needs base64)
         const result = await verifyTaskProof(taskToVerify, base64String, optimizedFile.type);
         
         let newStatus = VerificationStatus.PENDING;
@@ -260,24 +261,34 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
         let completedAt: number | null = null;
 
         if (result.verified) {
-           // Reuse Base64 string for storage
-           publicUrl = base64String;
-           newStatus = VerificationStatus.VERIFIED;
-           completedAt = Date.now();
+           // 3. Upload to Firebase Storage if verified
+           try {
+             const path = `proofs/${user.googleId}/${Date.now()}_${optimizedFile.name}`;
+             publicUrl = await uploadFile(optimizedFile, path);
+             newStatus = VerificationStatus.VERIFIED;
+             completedAt = Date.now();
+           } catch (uploadErr) {
+             console.error("Upload failed", uploadErr);
+             alert("Verification successful but upload failed. Please try again.");
+             updateTaskStatus(currentTaskId, VerificationStatus.PENDING);
+             setVerifyingId(null);
+             return;
+           }
         } else {
            newStatus = VerificationStatus.REJECTED;
            rejectionReason = result.reason || "Verification failed";
         }
         
-        // 3. CRITICAL: Update Database BEFORE updating parent stats
-        await supabase.from('tasks').update({
+        // 4. Update Database
+        const taskRef = doc(db, 'tasks', currentTaskId);
+        await updateDoc(taskRef, {
           status: newStatus,
-          completed_at: completedAt,
-          proof_image: publicUrl || null,
-          rejection_reason: rejectionReason
-        }).eq('id', currentTaskId);
+          completedAt: completedAt,
+          proofImage: publicUrl || null,
+          rejectionReason: rejectionReason
+        });
 
-        // 4. Update Local State
+        // 5. Update Local State
         setTasks(prev => prev.map(t => 
             t.id === currentTaskId 
             ? { 
@@ -293,7 +304,7 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
         setVerifyingId(null);
         setSelectedTaskForUpload(null);
 
-        // 5. Trigger Stats Update (No full re-sync)
+        // 6. Trigger Stats Update (No full re-sync)
         if (result.verified) {
            updateCompletedHours(taskToVerify.durationHours);
         } else if (!result.verified) {
