@@ -104,189 +104,211 @@ const App: React.FC = () => {
     const currentWeekId = getCurrentWeekId();
 
     try {
-      // Parallel execution for faster load times
+      // Sequential execution for better error isolation
       
       // 1. Profile
-      const profileRef = doc(db, 'users', googleId);
-      const profileSnapPromise = getDoc(profileRef);
+      let currentUserGoal = 80;
+      try {
+        const profileRef = doc(db, 'users', googleId);
+        const profileSnap = await getDoc(profileRef);
+        
+        if (profileSnap.exists()) {
+           const data = profileSnap.data();
+           currentUserGoal = data.weeklyGoalHours || 80;
+           if (user && user.weeklyGoalHours !== currentUserGoal) {
+               setUser(prev => prev ? { ...prev, weeklyGoalHours: currentUserGoal } : null);
+           }
+        } else {
+           // Profile doesn't exist, create it
+           await setDoc(profileRef, {
+               email: user?.email || '',
+               name: user?.name || 'User',
+               avatarUrl: user?.avatarUrl || '',
+               weeklyGoalHours: 80
+           });
+        }
+      } catch (err: any) {
+        console.error("Error fetching/creating profile:", err);
+        // Don't block loading on profile error, use defaults
+      }
 
       // 2. Tasks
-      const tasksQuery = query(
-        collection(db, 'tasks'), 
-        where('userId', '==', googleId),
-        orderBy('createdAt', 'desc')
-      );
-      const tasksSnapPromise = getDocs(tasksQuery);
+      let formattedTasks: Task[] = [];
+      try {
+        // Simplified query to avoid composite index requirement on initial load
+        const tasksQuery = query(
+          collection(db, 'tasks'), 
+          where('userId', '==', googleId)
+        );
+        const tasksSnap = await getDocs(tasksQuery);
+        
+        tasksSnap.forEach((doc) => {
+          const data = doc.data();
+          formattedTasks.push({
+            id: doc.id,
+            title: data.title,
+            description: data.description,
+            type: data.type,
+            durationHours: data.durationHours,
+            createdAt: data.createdAt,
+            completedAt: data.completedAt,
+            status: data.status,
+            rejectionReason: data.rejectionReason,
+            proofImage: data.proofImage
+          });
+        });
+        // Sort in memory (descending by createdAt)
+        formattedTasks.sort((a, b) => {
+            const dateA = new Date(a.createdAt).getTime();
+            const dateB = new Date(b.createdAt).getTime();
+            return dateB - dateA;
+        });
+        setTasks(formattedTasks);
+      } catch (err: any) {
+        console.error("Error fetching tasks:", err);
+        // If tasks fail, we can still show the dashboard but with empty tasks
+        // However, this might be critical. Let's not throw yet.
+      }
 
       // 3. History (Weekly Stats excluding current week)
-      // Note: If index is missing, this query will fail. 
-      // We wrap it in a try/catch or fall back to client-side filtering if needed.
-      const historyQuery = query(
-        collection(db, 'weeklyStats'),
-        where('userId', '==', googleId),
-        where('weekId', '!=', currentWeekId),
-        orderBy('weekId', 'asc')
-      );
-      
-      let allStatsSnap;
-      try {
-          allStatsSnap = await getDocs(historyQuery);
-      } catch (err: any) {
-          console.warn("History query failed (likely missing index), falling back to client-side filtering.", err);
-          // Fallback: Fetch all stats and filter in memory
-          const fallbackQuery = query(
-            collection(db, 'weeklyStats'),
-            where('userId', '==', googleId)
-          );
-          allStatsSnap = await getDocs(fallbackQuery);
-      }
-
-      const [profileSnap, tasksSnap] = await Promise.all([
-        profileSnapPromise,
-        tasksSnapPromise
-      ]);
-
-      // 1. Process Profile
-      let currentUserGoal = 80;
-      if (profileSnap.exists()) {
-         const data = profileSnap.data();
-         currentUserGoal = data.weeklyGoalHours || 80;
-         if (user && user.weeklyGoalHours !== currentUserGoal) {
-             // Update local user state if goal differs
-             setUser(prev => prev ? { ...prev, weeklyGoalHours: currentUserGoal } : null);
-         }
-      } else {
-         // Profile doesn't exist, create it
-         await setDoc(profileRef, {
-             email: user?.email || '',
-             name: user?.name || 'User',
-             avatarUrl: user?.avatarUrl || '',
-             weeklyGoalHours: 80
-         });
-      }
-
-      // 2. Process Tasks
-      let formattedTasks: Task[] = [];
-      tasksSnap.forEach((doc) => {
-        const data = doc.data();
-        formattedTasks.push({
-          id: doc.id,
-          title: data.title,
-          description: data.description,
-          type: data.type,
-          durationHours: data.durationHours,
-          createdAt: data.createdAt,
-          completedAt: data.completedAt,
-          status: data.status,
-          rejectionReason: data.rejectionReason,
-          proofImage: data.proofImage
-        });
-      });
-      setTasks(formattedTasks);
-
-      // 3. Process Stats & History
       let formattedHistory: HistoryEntry[] = [];
       let currentStatsObj: WeeklyStats | null = null;
 
-      allStatsSnap.forEach((doc) => {
-        const data = doc.data();
-        const entry: HistoryEntry = {
-          id: doc.id,
-          weekId: data.weekId,
-          goalHours: data.goalHours,
-          completedHours: data.completedHours,
-          screenTimeHours: data.screenTimeHours,
-          rating: data.rating,
-          streakActive: data.streakActive,
-          startDate: data.startDate,
-          endDate: data.endDate
-        };
-
-        if (data.weekId === currentWeekId) {
-          currentStatsObj = entry;
-        } else {
-          formattedHistory.push(entry);
+      try {
+        // Note: If index is missing, this query will fail. 
+        // We wrap it in a try/catch or fall back to client-side filtering if needed.
+        const historyQuery = query(
+          collection(db, 'weeklyStats'),
+          where('userId', '==', googleId),
+          where('weekId', '!=', currentWeekId),
+          orderBy('weekId', 'asc')
+        );
+        
+        let allStatsSnap;
+        try {
+            allStatsSnap = await getDocs(historyQuery);
+        } catch (err: any) {
+            console.warn("History query failed (likely missing index), falling back to client-side filtering.", err);
+            // Fallback: Fetch all stats and filter in memory
+            const fallbackQuery = query(
+              collection(db, 'weeklyStats'),
+              where('userId', '==', googleId)
+            );
+            allStatsSnap = await getDocs(fallbackQuery);
         }
-      });
-      
-      // Sort history
-      formattedHistory.sort((a, b) => a.weekId.localeCompare(b.weekId));
-      setHistory(formattedHistory);
+
+        allStatsSnap.forEach((doc) => {
+          const data = doc.data();
+          const entry: HistoryEntry = {
+            id: doc.id,
+            weekId: data.weekId,
+            goalHours: data.goalHours,
+            completedHours: data.completedHours,
+            screenTimeHours: data.screenTimeHours,
+            rating: data.rating,
+            streakActive: data.streakActive,
+            startDate: data.startDate,
+            endDate: data.endDate
+          };
+
+          if (data.weekId === currentWeekId) {
+            currentStatsObj = entry;
+          } else {
+            formattedHistory.push(entry);
+          }
+        });
+        
+        // Sort history
+        formattedHistory.sort((a, b) => a.weekId.localeCompare(b.weekId));
+        setHistory(formattedHistory);
+      } catch (err: any) {
+        console.error("Error fetching history:", err);
+        // Non-critical, continue
+      }
 
       // 4. Process Current Stats & Self-Healing
-      const now = new Date();
-      const currentDay = now.getDay(); 
-      const distanceToMonday = currentDay === 0 ? 6 : currentDay - 1;
-      const monday = new Date(now);
-      monday.setDate(now.getDate() - distanceToMonday);
-      monday.setHours(0, 0, 0, 0);
-      const nextMonday = new Date(monday);
-      nextMonday.setDate(monday.getDate() + 7);
+      try {
+        const now = new Date();
+        const currentDay = now.getDay(); 
+        const distanceToMonday = currentDay === 0 ? 6 : currentDay - 1;
+        const monday = new Date(now);
+        monday.setDate(now.getDate() - distanceToMonday);
+        monday.setHours(0, 0, 0, 0);
+        const nextMonday = new Date(monday);
+        nextMonday.setDate(monday.getDate() + 7);
 
-      const actualCompletedHours = formattedTasks
-        .filter(t => {
-           if (t.status !== VerificationStatus.VERIFIED || !t.completedAt) return false;
-           const d = new Date(t.completedAt);
-           return d >= monday && d < nextMonday;
-        })
-        .reduce((acc, t) => acc + t.durationHours, 0);
+        const actualCompletedHours = formattedTasks
+          .filter(t => {
+             if (t.status !== VerificationStatus.VERIFIED || !t.completedAt) return false;
+             const d = new Date(t.completedAt);
+             return d >= monday && d < nextMonday;
+          })
+          .reduce((acc, t) => acc + t.durationHours, 0);
 
-      if (currentStatsObj) {
-        // Self-heal check
-        if (Math.abs(currentStatsObj.completedHours - actualCompletedHours) > 0.1) {
-            currentStatsObj.completedHours = actualCompletedHours;
-            // Fire and forget update
-            const statsRef = doc(db, 'weeklyStats', `${googleId}_${currentWeekId}`);
-            updateDoc(statsRef, { completedHours: actualCompletedHours })
-              .catch(err => console.error("Background stat sync failed", err));
+        if (currentStatsObj) {
+          // Self-heal check
+          if (Math.abs(currentStatsObj.completedHours - actualCompletedHours) > 0.1) {
+              currentStatsObj.completedHours = actualCompletedHours;
+              // Fire and forget update
+              const statsRef = doc(db, 'weeklyStats', `${googleId}_${currentWeekId}`);
+              updateDoc(statsRef, { completedHours: actualCompletedHours })
+                .catch(err => console.error("Background stat sync failed", err));
+          }
+          setStats(currentStatsObj);
+        } else {
+          // Create new week
+          currentStatsObj = {
+            weekId: currentWeekId,
+            startDate: monday.toLocaleDateString(),
+            endDate: new Date(nextMonday.getTime() - 1).toLocaleDateString(),
+            goalHours: currentUserGoal,
+            completedHours: actualCompletedHours,
+            screenTimeHours: 0,
+            rating: 0,
+            streakActive: true
+          };
+          setStats(currentStatsObj);
+          
+          const statsRef = doc(db, 'weeklyStats', `${googleId}_${currentWeekId}`);
+          setDoc(statsRef, {
+            userId: googleId,
+            ...currentStatsObj
+          }).catch(err => console.error("Error creating weekly stats", err));
         }
-        setStats(currentStatsObj);
-      } else {
-        // Create new week
-        currentStatsObj = {
-          weekId: currentWeekId,
-          startDate: monday.toLocaleDateString(),
-          endDate: new Date(nextMonday.getTime() - 1).toLocaleDateString(),
-          goalHours: currentUserGoal,
-          completedHours: actualCompletedHours,
-          screenTimeHours: 0,
-          rating: 0,
-          streakActive: true
-        };
-        setStats(currentStatsObj);
-        
-        const statsRef = doc(db, 'weeklyStats', `${googleId}_${currentWeekId}`);
-        setDoc(statsRef, {
-          userId: googleId,
-          ...currentStatsObj
-        }).catch(err => console.error("Error creating weekly stats", err));
+      } catch (err: any) {
+        console.error("Error processing current stats:", err);
+        throw new Error("Failed to initialize weekly stats.");
       }
 
       // --- STREAK CALCULATION LOGIC ---
-      let streak = 0;
-      let checkWeekId = currentWeekId;
+      try {
+        let streak = 0;
+        let checkWeekId = currentWeekId;
 
-      if (currentStatsObj.completedHours >= currentStatsObj.goalHours) {
-        streak++;
-        checkWeekId = getPreviousWeekId(checkWeekId);
-      } else {
-        checkWeekId = getPreviousWeekId(checkWeekId);
-      }
+        if (currentStatsObj && currentStatsObj.completedHours >= currentStatsObj.goalHours) {
+          streak++;
+          checkWeekId = getPreviousWeekId(checkWeekId);
+        } else {
+          checkWeekId = getPreviousWeekId(checkWeekId);
+        }
 
-      const reversedHistory = [...formattedHistory].sort((a, b) => b.weekId.localeCompare(a.weekId));
-      
-      for (const entry of reversedHistory) {
-         if (entry.weekId !== checkWeekId) break; 
-         if (entry.completedHours >= entry.goalHours) {
-           streak++;
-           checkWeekId = getPreviousWeekId(checkWeekId);
-         } else {
-           break;
-         }
-      }
+        const reversedHistory = [...formattedHistory].sort((a, b) => b.weekId.localeCompare(a.weekId));
+        
+        for (const entry of reversedHistory) {
+           if (entry.weekId !== checkWeekId) break; 
+           if (entry.completedHours >= entry.goalHours) {
+             streak++;
+             checkWeekId = getPreviousWeekId(checkWeekId);
+           } else {
+             break;
+           }
+        }
 
-      if (user && user.currentStreak !== streak) {
-          setUser(prev => prev ? { ...prev, currentStreak: streak } : null);
+        if (user && user.currentStreak !== streak) {
+            setUser(prev => prev ? { ...prev, currentStreak: streak } : null);
+        }
+      } catch (err: any) {
+        console.error("Error calculating streak:", err);
       }
 
     } catch (err: any) {

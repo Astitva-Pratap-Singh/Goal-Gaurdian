@@ -17,7 +17,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Eye,
-  Loader2
+  Loader2,
+  User
 } from 'lucide-react';
 
 export const Icons = {
@@ -38,5 +39,6 @@ export const Icons = {
   ChevronLeft,
   ChevronRight,
   Eye,
-  Loader: Loader2
+  Loader: Loader2,
+  User
 };
