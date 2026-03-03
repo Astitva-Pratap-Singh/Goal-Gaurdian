@@ -4,7 +4,6 @@ import { Dashboard } from './components/Dashboard';
 import { TaskList } from './components/TaskList';
 import { ScreenTimeUpload } from './components/ScreenTimeUpload';
 import { History } from './components/History';
-import { DataImport } from './components/DataImport';
 import { Auth } from './components/Auth';
 import { Icons } from './components/Icons';
 import { UserProfile, WeeklyStats, Task, HistoryEntry, VerificationStatus } from './types';
@@ -456,7 +455,6 @@ const App: React.FC = () => {
           {currentView === 'tasks' && <TaskList tasks={tasks} setTasks={setTasks} user={user} updateCompletedHours={updateCompletedHours} />}
           {currentView === 'screentime' && <ScreenTimeUpload user={user} onSubmit={handleScreenTimeSubmit} />}
           {currentView === 'history' && <History history={[...history, { ...stats!, id: 'current' } as HistoryEntry]} tasks={tasks} />}
-          {currentView === 'migration' && <DataImport user={user} />}
         </div>
       </main>
     </div>

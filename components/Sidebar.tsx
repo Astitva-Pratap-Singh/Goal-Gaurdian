@@ -16,7 +16,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, currentView, setView, on
     { id: 'tasks', label: 'Tasks', icon: Icons.CheckCircle },
     { id: 'screentime', label: 'Screen Time', icon: Icons.Smartphone },
     { id: 'history', label: 'History', icon: Icons.BarChart },
-    { id: 'migration', label: 'Migration', icon: Icons.Database },
   ];
 
   const handleGoalClick = () => {
