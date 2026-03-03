@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider } from 'firebase/auth';
+import { getAuth, GoogleAuthProvider, setPersistence, browserLocalPersistence } from 'firebase/auth';
 import { initializeFirestore, memoryLocalCache } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 
@@ -25,6 +25,13 @@ console.log("Firebase Config (Sanitized):", {
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
+
+// Explicitly set persistence to avoid DOMException in iframes
+// We don't await this here to avoid making the module async, but it kicks off immediately
+setPersistence(auth, browserLocalPersistence).catch(err => {
+  console.warn("Failed to set auth persistence:", err);
+});
+
 export const googleProvider = new GoogleAuthProvider();
 
 // Initialize Firestore with memory cache and long polling to avoid WebSocket/IndexedDB issues in restricted environments

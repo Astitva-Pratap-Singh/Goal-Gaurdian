@@ -314,7 +314,14 @@ const App: React.FC = () => {
     } catch (err: any) {
         console.error("Critical error fetching user data:", err);
       if (err.code === 'unavailable') {
-        setFetchError("Network or Configuration Error: Unable to connect to the database. Please check your internet connection and verify that your Firebase Project ID is correct.");
+        const projectId = import.meta.env.VITE_FIREBASE_PROJECT_ID || 'unknown';
+        setFetchError(`Connection Failed (Code: unavailable).
+        
+        Troubleshooting Checklist:
+        1. Is your internet connection stable?
+        2. Is the Project ID correct? (Using: "${projectId.substring(0, 8)}...")
+        3. Have you created the Firestore Database in the Firebase Console? (Build -> Firestore Database -> Create Database)
+        4. Are you using a VPN or Firewall blocking Firestore?`);
       } else {
         setFetchError(err.message || "Failed to connect to Firebase.");
       }
