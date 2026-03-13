@@ -269,10 +269,6 @@ const App: React.FC = () => {
   };
 
   const initializeCurrentWeek = async (googleId: string, goalHours: number) => {
-    // Only create if we are sure it doesn't exist (which we know from the snapshot being empty for this week)
-    // But we need to be careful not to infinite loop. 
-    // The snapshot listener handles updates. If we write, it will fire again.
-    
     // We'll check existence once with a getDoc to be safe before writing
     const currentWeekId = getCurrentWeekId();
     const statsRef = doc(db, 'weeklyStats', `${googleId}_${currentWeekId}`);
@@ -301,10 +297,27 @@ const App: React.FC = () => {
           userId: googleId
         };
         
+        // OPTIMISTIC UPDATE: Unblock the UI immediately!
+        setStats(newStats as WeeklyStats);
+        
         await setDoc(statsRef, newStats);
+      } else {
+        // If it does exist but wasn't caught by snapshot yet
+        setStats(docSnap.data() as WeeklyStats);
       }
     } catch (err) {
       console.error("Error initializing week:", err);
+      // Fallback to unblock UI even on error
+      setStats({
+          weekId: currentWeekId,
+          startDate: new Date().toLocaleDateString(),
+          endDate: new Date().toLocaleDateString(),
+          goalHours: goalHours,
+          completedHours: 0,
+          screenTimeHours: 0,
+          rating: 0,
+          streakActive: true
+      } as WeeklyStats);
     }
   };
 

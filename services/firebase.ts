@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, setPersistence, browserLocalPersistence } from 'firebase/auth';
-import { initializeFirestore, memoryLocalCache } from 'firebase/firestore';
+import { getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 
 const rawProjectId = import.meta.env.VITE_FIREBASE_PROJECT_ID || '';
@@ -34,10 +34,7 @@ setPersistence(auth, browserLocalPersistence).catch(err => {
 
 export const googleProvider = new GoogleAuthProvider();
 
-// Initialize Firestore with memory cache and long polling to avoid WebSocket/IndexedDB issues in restricted environments
-export const db = initializeFirestore(app, {
-  localCache: memoryLocalCache(),
-  experimentalForceLongPolling: true,
-});
+// Initialize standard Firestore (removed long polling which can cause extreme slowness)
+export const db = getFirestore(app);
 
 export const storage = getStorage(app);
