@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Icons } from './Icons';
 import { signIn } from 'next-auth/react';
+import Image from 'next/image';
 
 interface AuthProps {
   onLogin?: (user: any) => void;
@@ -39,7 +40,7 @@ export const Auth: React.FC<AuthProps> = () => {
             {isLoading ? (
               <Icons.Loader className="w-5 h-5 animate-spin" />
             ) : (
-              <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5" alt="Google" />
+              <Image src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width={20} height={20} className="w-5 h-5" alt="Google" referrerPolicy="no-referrer" />
             )}
             Continue with Google
           </button>

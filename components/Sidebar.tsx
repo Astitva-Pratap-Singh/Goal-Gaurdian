@@ -1,6 +1,7 @@
 import React from 'react';
 import { Icons } from './Icons';
 import { UserProfile } from '../types';
+import Image from 'next/image';
 
 interface SidebarProps {
   user: UserProfile;
@@ -36,7 +37,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, currentView, setView, on
         </div>
         
         <div className="flex items-center gap-3 bg-slate-800/50 p-3 rounded-xl border border-slate-700">
-          <img src={user.avatarUrl} alt="User" className="w-10 h-10 rounded-full border-2 border-indigo-500" />
+          <Image src={user.avatarUrl || "https://picsum.photos/seed/user/40/40"} width={40} height={40} alt="User" className="w-10 h-10 rounded-full border-2 border-indigo-500" referrerPolicy="no-referrer" />
           <div className="overflow-hidden">
             <p className="text-sm font-semibold text-white truncate">{user.name}</p>
             <button 

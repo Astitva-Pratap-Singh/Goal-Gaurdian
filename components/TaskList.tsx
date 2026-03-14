@@ -1,6 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { Icons } from './Icons';
 import { Task, TaskType, VerificationStatus, UserProfile } from '../types';
+import { verifyTaskImage } from '../services/geminiService';
 
 interface TaskListProps {
   tasks: Task[];
@@ -18,6 +19,14 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
   const [newTaskType, setNewTaskType] = useState<TaskType>(TaskType.WORK);
   const [newTaskDuration, setNewTaskDuration] = useState<number>(1);
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+
+  // Verification Modal State
+  const [isVerifyModalOpen, setIsVerifyModalOpen] = useState(false);
+  const [taskToVerify, setTaskToVerify] = useState<Task | null>(null);
+  const [verificationImage, setVerificationImage] = useState<string | null>(null);
+  const [verificationMimeType, setVerificationMimeType] = useState<string | null>(null);
+  const [isVerifying, setIsVerifying] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Daily Limit Calculation
   const dailyLimit = user.weeklyGoalHours / 7;
@@ -179,34 +188,76 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
     }
   };
 
-  const handleMarkAsDone = async (taskId: string) => {
-    const taskIndex = tasks.findIndex(t => t.id === taskId);
-    if (taskIndex === -1) return;
-    const taskToVerify = tasks[taskIndex];
+  const openVerifyModal = (task: Task) => {
+    setTaskToVerify(task);
+    setVerificationImage(null);
+    setVerificationMimeType(null);
+    setIsVerifyModalOpen(true);
+  };
 
-    const updatedTask = {
-      ...taskToVerify,
-      status: VerificationStatus.VERIFIED,
-      completedAt: Date.now(),
-    };
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64String = reader.result as string;
+        const mimeType = base64String.split(';')[0].split(':')[1];
+        const base64Data = base64String.split(',')[1];
+        
+        setVerificationImage(base64Data);
+        setVerificationMimeType(mimeType);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
-    // Optimistic Update
-    setTasks(prev => prev.map(t => t.id === taskId ? updatedTask : t));
-    updateCompletedHours(taskToVerify.durationHours);
-
-    // DB Update
+  const submitVerification = async () => {
+    if (!taskToVerify || !verificationImage || !verificationMimeType) return;
+    
+    setIsVerifying(true);
+    
+    // Set task status to verifying
+    const verifyingTask = { ...taskToVerify, status: VerificationStatus.VERIFYING };
+    setTasks(prev => prev.map(t => t.id === taskToVerify.id ? verifyingTask : t));
+    
     try {
+      const result = await verifyTaskImage(
+        taskToVerify.title,
+        taskToVerify.description,
+        verificationImage,
+        verificationMimeType
+      );
+      
+      const finalStatus = result.verified ? VerificationStatus.VERIFIED : VerificationStatus.REJECTED;
+      
+      const updatedTask = {
+        ...taskToVerify,
+        status: finalStatus,
+        completedAt: result.verified ? Date.now() : undefined,
+        rejectionReason: result.verified ? undefined : result.reason
+      };
+      
+      setTasks(prev => prev.map(t => t.id === taskToVerify.id ? updatedTask : t));
+      
+      if (result.verified) {
+        updateCompletedHours(taskToVerify.durationHours);
+      }
+      
+      // DB Update (We don't send the image to DB, only the task data)
       await fetch(`/api/users/${user.googleId}/tasks`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updatedTask)
       });
+      
     } catch (error) {
-      console.error("Error updating task status", error);
-      alert("Failed to update task status on server.");
-      // Revert optimistic update
-      setTasks(prev => prev.map(t => t.id === taskId ? taskToVerify : t));
-      updateCompletedHours(-taskToVerify.durationHours);
+      console.error("Verification error", error);
+      alert("Verification failed due to an error.");
+      setTasks(prev => prev.map(t => t.id === taskToVerify.id ? taskToVerify : t));
+    } finally {
+      setIsVerifying(false);
+      setIsVerifyModalOpen(false);
+      setTaskToVerify(null);
     }
   };
 
@@ -289,14 +340,19 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
                       <Icons.Trash className="w-5 h-5" />
                     </button>
                  </div>
+               ) : task.status === VerificationStatus.VERIFYING ? (
+                 <div className="flex items-center gap-2 text-indigo-400 px-4 py-2 bg-indigo-950/20 rounded-lg border border-indigo-900/50">
+                    <Icons.Loader className="w-5 h-5 animate-spin" />
+                    <span className="font-medium">Verifying...</span>
+                 </div>
                ) : (
                  <div className="flex items-center gap-2 w-full md:w-auto">
                     <button 
-                        onClick={() => handleMarkAsDone(task.id)}
+                        onClick={() => openVerifyModal(task)}
                         className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg border border-indigo-500 transition-colors"
                     >
                         <Icons.CheckCircle className="w-4 h-4" />
-                        Mark as Done
+                        Verify & Done
                     </button>
                     <button 
                       onClick={() => handleDeleteTask(task.id)}
@@ -378,6 +434,75 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
                 className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium"
               >
                 {editingTaskId ? 'Save Changes' : 'Create'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Verification Modal */}
+      {isVerifyModalOpen && taskToVerify && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 w-full max-w-md rounded-2xl p-6 shadow-2xl">
+            <h3 className="text-xl font-bold text-white mb-2">Verify Task</h3>
+            <p className="text-slate-400 text-sm mb-6">
+              Upload an image as proof of completing &quot;{taskToVerify.title}&quot;. Our AI will analyze it to verify your work.
+            </p>
+            
+            <div className="space-y-4">
+              <div 
+                className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors ${verificationImage ? 'border-indigo-500 bg-indigo-500/10' : 'border-slate-700 hover:border-indigo-500 hover:bg-slate-800'}`}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <input 
+                  type="file" 
+                  ref={fileInputRef} 
+                  onChange={handleImageUpload} 
+                  accept="image/jpeg, image/png, image/webp" 
+                  className="hidden" 
+                />
+                
+                {verificationImage ? (
+                  <div className="flex flex-col items-center">
+                    <div className="w-16 h-16 bg-indigo-600/20 rounded-full flex items-center justify-center mb-3">
+                      <Icons.CheckCircle className="w-8 h-8 text-indigo-400" />
+                    </div>
+                    <p className="text-indigo-300 font-medium">Image uploaded</p>
+                    <p className="text-xs text-slate-500 mt-1">Click to change</p>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center">
+                    <div className="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center mb-3">
+                      <Icons.Upload className="w-8 h-8 text-slate-400" />
+                    </div>
+                    <p className="text-slate-300 font-medium">Click to upload proof</p>
+                    <p className="text-xs text-slate-500 mt-1">JPEG, PNG, WEBP</p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex gap-3 mt-6">
+              <button 
+                onClick={() => setIsVerifyModalOpen(false)}
+                disabled={isVerifying}
+                className="flex-1 px-4 py-2 bg-slate-800 text-slate-300 rounded-lg hover:bg-slate-700 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={submitVerification}
+                disabled={!verificationImage || isVerifying}
+                className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {isVerifying ? (
+                  <>
+                    <Icons.Loader className="w-4 h-4 animate-spin" />
+                    Analyzing...
+                  </>
+                ) : (
+                  'Submit Proof'
+                )}
               </button>
             </div>
           </div>

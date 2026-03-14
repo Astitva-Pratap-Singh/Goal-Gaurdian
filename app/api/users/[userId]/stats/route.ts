@@ -5,7 +5,7 @@ export async function POST(request: Request, { params }: { params: { userId: str
   const { userId } = params;
   try {
     const stat = await request.json();
-    await redis.hset(`user:${userId}:stats`, stat.weekId, JSON.stringify(stat));
+    await redis.hset(`user:${userId}:stats`, { [stat.weekId]: stat });
     return NextResponse.json({ success: true });
   } catch (error) {
     return NextResponse.json({ error: "Failed to update stats" }, { status: 500 });

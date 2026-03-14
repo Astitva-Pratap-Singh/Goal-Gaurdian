@@ -5,7 +5,7 @@ export async function POST(request: Request, { params }: { params: { userId: str
   const { userId } = params;
   try {
     const body = await request.json();
-    await redis.set(`user:${userId}:profile`, JSON.stringify(body));
+    await redis.set(`user:${userId}:profile`, body);
     return NextResponse.json({ success: true });
   } catch (error) {
     return NextResponse.json({ error: "Failed to update profile" }, { status: 500 });

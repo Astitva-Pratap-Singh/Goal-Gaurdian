@@ -10,9 +10,9 @@
   },
   "dependencies": {
     "@google/genai": "*",
+    "@next-auth/upstash-redis-adapter": "^3.0.4",
+    "@upstash/redis": "^1.37.0",
     "browser-image-compression": "^2.0.2",
-    "firebase": "^12.10.0",
-    "ioredis": "^5.4.1",
     "lucide-react": "^0.378.0",
     "next": "^14.2.3",
     "next-auth": "^4.24.13",
