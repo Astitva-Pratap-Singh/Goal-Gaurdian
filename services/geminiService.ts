@@ -47,20 +47,32 @@ export const verifyTaskImage = async (
   mimeType: string
 ): Promise<{ verified: boolean; reason: string }> => {
   try {
-    if (!process.env.NEXT_PUBLIC_GEMINI_API_KEY) {
-      return { verified: true, reason: "Mock verification (No API Key)" };
+    if (!process.env.NEXT_PUBLIC_GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY === 'mock-key') {
+      return { 
+        verified: false, 
+        reason: "AI Verification is disabled. Please set NEXT_PUBLIC_GEMINI_API_KEY in your environment variables to enable real verification." 
+      };
     }
 
     const prompt = `
-      You are an AI productivity verifier. The user claims they completed the following task:
+      You are a strict AI productivity verifier. The user claims they completed the following task:
       Title: "${taskTitle}"
       Description: "${taskDescription}"
       
-      They have provided an image as proof. Analyze the image to determine if it reasonably proves the task was completed or worked on.
+      They have provided an image as proof. 
+      Your job is to CRITICALLY analyze the image to determine if it provides CLEAR evidence that the task was actually worked on or completed.
       
-      Respond in JSON format with two fields:
-      - "verified": boolean (true if the image is acceptable proof, false otherwise)
-      - "reason": string (a short explanation of why it was accepted or rejected)
+      Guidelines:
+      1. If the image is generic, unrelated, or doesn't show progress toward the specific task, REJECT it.
+      2. If the image is a black screen, a random selfie, or a meme, REJECT it.
+      3. If the image shows a workspace, code, a book, or a document that matches the task description, ACCEPT it.
+      4. Be skeptical. If you are unsure, REJECT it.
+      
+      Respond ONLY in JSON format with these fields:
+      {
+        "verified": boolean,
+        "reason": "A concise explanation of your decision. If rejected, be specific about why the proof was insufficient."
+      }
     `;
 
     const response = await ai.models.generateContent({
@@ -81,13 +93,15 @@ export const verifyTaskImage = async (
       },
     });
 
-    const result = JSON.parse(response.text || "{}");
+    const text = response.text || "{}";
+    const result = JSON.parse(text);
+    
     return {
-      verified: !!result.verified,
-      reason: result.reason || "Unable to verify",
+      verified: typeof result.verified === 'boolean' ? result.verified : false,
+      reason: result.reason || "Unable to determine verification status.",
     };
   } catch (error) {
     console.error("Error verifying task image:", error);
-    return { verified: false, reason: "Error contacting verification service." };
+    return { verified: false, reason: "Error contacting verification service. Please check your API key and connection." };
   }
 };

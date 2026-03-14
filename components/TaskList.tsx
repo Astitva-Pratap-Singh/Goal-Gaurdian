@@ -318,7 +318,12 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
                 </span>
 
                 {task.status === VerificationStatus.REJECTED && (
-                    <span className="text-xs text-red-400 bg-red-950/30 px-2 rounded">Rejected: {task.rejectionReason}</span>
+                  <div className="mt-2 p-2 bg-red-950/30 border border-red-900/50 rounded-lg">
+                    <p className="text-xs text-red-400 flex items-start gap-1">
+                      <Icons.Shield className="w-3 h-3 mt-0.5 shrink-0" />
+                      <span><strong>Rejected:</strong> {task.rejectionReason}</span>
+                    </p>
+                  </div>
                 )}
               </div>
               <h3 className="text-lg font-semibold text-slate-100 pr-8">{task.title}</h3>
