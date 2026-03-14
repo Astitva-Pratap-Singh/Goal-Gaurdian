@@ -18,11 +18,12 @@ import {
   Line
 } from 'recharts';
 import { Icons } from './Icons';
-import { HistoryEntry, Task, TaskType } from '../types';
+import { HistoryEntry, Task, TaskType, ScreenTimeEntry } from '../types';
 
 interface HistoryProps {
   history: HistoryEntry[];
   tasks: Task[];
+  screentime: ScreenTimeEntry[];
 }
 
 // Helper to calculate ISO Week ID (Matches App.tsx logic)
@@ -38,7 +39,7 @@ const getWeekIdFromTimestamp = (timestamp: number) => {
   return `${d.getFullYear()}-W${String(weekNo).padStart(2, '0')}`;
 };
 
-export const History: React.FC<HistoryProps> = ({ history, tasks }) => {
+export const History: React.FC<HistoryProps> = ({ history, tasks, screentime }) => {
   const [expandedWeekId, setExpandedWeekId] = useState<string | null>(null);
 
   // 1. Sort history chronologically (Oldest -> Newest) using robust numeric parsing
@@ -120,13 +121,11 @@ export const History: React.FC<HistoryProps> = ({ history, tasks }) => {
   // Helper for Daily Activity Trends: Productivity vs Screen Time
   const getDailyTrendData = (entry: HistoryEntry) => {
     const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    // Use average screen time (Total / 7) as we don't have daily storage yet
-    const avgDailyScreenTime = parseFloat((entry.screenTimeHours / 7).toFixed(1));
     
     const data = days.map(day => ({
         day,
         productivity: 0,
-        screentime: avgDailyScreenTime
+        screentime: 0
     }));
 
     const weekTasks = getTasksForWeek(entry);
@@ -141,6 +140,19 @@ export const History: React.FC<HistoryProps> = ({ history, tasks }) => {
         if (data[dayIndex]) {
             data[dayIndex].productivity += task.durationHours;
         }
+    });
+
+    // Fill screen time from entries
+    const weekScreentime = screentime.filter(s => {
+        const weekId = getWeekIdFromTimestamp(s.submittedAt);
+        return weekId === entry.weekId;
+    });
+
+    weekScreentime.forEach(s => {
+        const date = new Date(s.submittedAt);
+        let dayIndex = date.getDay() - 1;
+        if (dayIndex === -1) dayIndex = 6;
+        if (data[dayIndex]) data[dayIndex].screentime += s.hours;
     });
 
     return data;

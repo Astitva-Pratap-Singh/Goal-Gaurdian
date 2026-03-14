@@ -12,7 +12,10 @@ export async function GET(request: Request, { params }: { params: { userId: stri
     const statsHash = await redis.hgetall(`user:${userId}:stats`);
     const stats = statsHash ? Object.values(statsHash) : [];
 
-    return NextResponse.json({ profile, tasks, stats });
+    const screentimeHash = await redis.hgetall(`user:${userId}:screentime`);
+    const screentime = screentimeHash ? Object.values(screentimeHash) : [];
+
+    return NextResponse.json({ profile, tasks, stats, screentime });
   } catch (error) {
     console.error(error);
     return NextResponse.json({ error: "Failed to fetch data" }, { status: 500 });

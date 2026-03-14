@@ -8,7 +8,7 @@ import { ScreenTimeUpload } from '../components/ScreenTimeUpload';
 const History = dynamic(() => import('../components/History').then(mod => mod.History), { ssr: false });
 import { Auth } from '../components/Auth';
 import { Icons } from '../components/Icons';
-import { UserProfile, WeeklyStats, Task, HistoryEntry, VerificationStatus } from '../types';
+import { UserProfile, WeeklyStats, Task, HistoryEntry, VerificationStatus, ScreenTimeEntry } from '../types';
 import { calculateWeeklyRating } from '../services/geminiService';
 import { useSession, signOut } from 'next-auth/react';
 
@@ -34,6 +34,7 @@ const App: React.FC = () => {
   const [stats, setStats] = useState<WeeklyStats | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [screentime, setScreentime] = useState<ScreenTimeEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
@@ -92,6 +93,9 @@ const App: React.FC = () => {
       const formattedTasks = data.tasks || [];
       formattedTasks.sort((a: Task, b: Task) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       setTasks(formattedTasks);
+
+      // Set Screentime
+      setScreentime(data.screentime || []);
 
       // Set Stats
       const currentWeekId = getCurrentWeekId();
@@ -188,7 +192,7 @@ const App: React.FC = () => {
     });
   };
 
-  const handleScreenTimeSubmit = async (hours: number) => {
+  const handleScreenTimeSubmit = async (hours: number, proofImage?: string) => {
      if (!user || !stats) return;
 
      const newScreenTime = stats.screenTimeHours + hours;
@@ -201,10 +205,25 @@ const App: React.FC = () => {
      const updatedStats = { ...stats, screenTimeHours: newScreenTime, rating: newRating };
      setStats(updatedStats);
 
+     // Update total stats
      await fetch(`/api/users/${user.googleId}/stats`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updatedStats)
+    });
+
+    // Store individual screen time entry
+    const entry = {
+      date: new Date().toISOString().split('T')[0],
+      hours,
+      proofImage,
+      submittedAt: Date.now()
+    };
+
+    await fetch(`/api/users/${user.googleId}/screentime`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(entry)
     });
   };
 
@@ -261,10 +280,10 @@ const App: React.FC = () => {
       
       <main className="flex-1 md:ml-64 p-4 md:p-8 overflow-y-auto h-screen">
         <div className="max-w-7xl mx-auto h-full">
-          {currentView === 'dashboard' && <Dashboard user={user} stats={stats!} tasks={tasks} />}
+          {currentView === 'dashboard' && <Dashboard user={user} stats={stats!} tasks={tasks} screentime={screentime} />}
           {currentView === 'tasks' && <TaskList tasks={tasks} setTasks={setTasks} user={user} updateCompletedHours={updateCompletedHours} />}
           {currentView === 'screentime' && <ScreenTimeUpload user={user} onSubmit={handleScreenTimeSubmit} />}
-          {currentView === 'history' && <History history={[...history, { ...stats!, id: 'current' } as HistoryEntry]} tasks={tasks} />}
+          {currentView === 'history' && <History history={[...history, { ...stats!, id: 'current' } as HistoryEntry]} tasks={tasks} screentime={screentime} />}
         </div>
       </main>
     </div>

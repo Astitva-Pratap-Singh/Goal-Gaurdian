@@ -233,11 +233,12 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
       
       const finalStatus = result.verified ? VerificationStatus.VERIFIED : VerificationStatus.REJECTED;
       
-      const updatedTask = {
+      const updatedTask: Task = {
         ...task,
         status: finalStatus,
         completedAt: result.verified ? Date.now() : undefined,
-        rejectionReason: result.verified ? undefined : result.reason
+        rejectionReason: result.verified ? undefined : result.reason,
+        proofImage: base64Image // Store the proof image in Redis
       };
       
       setTasks(prev => prev.map(t => t.id === task.id ? updatedTask : t));

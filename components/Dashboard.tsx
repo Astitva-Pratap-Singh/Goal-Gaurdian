@@ -1,15 +1,16 @@
 import React, { useMemo } from 'react';
 import { ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area, XAxis, YAxis, Tooltip, BarChart, Bar, CartesianGrid, Legend } from 'recharts';
 import { Icons } from './Icons';
-import { UserProfile, WeeklyStats, Task, TaskType } from '../types';
+import { UserProfile, WeeklyStats, Task, TaskType, ScreenTimeEntry } from '../types';
 
 interface DashboardProps {
   user: UserProfile;
   stats: WeeklyStats;
   tasks: Task[];
+  screentime: ScreenTimeEntry[];
 }
 
-export const Dashboard: React.FC<DashboardProps> = ({ user, stats, tasks }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ user, stats, tasks, screentime }) => {
   
   const completionPercentage = Math.min(100, (stats.completedHours / stats.goalHours) * 100);
 
@@ -55,7 +56,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, stats, tasks }) => {
   // Calculate Daily Activity for THIS WEEK
   const weeklyActivity = useMemo(() => {
     const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    const data = days.map(d => ({ day: d, hours: 0 }));
+    const data = days.map(d => ({ day: d, hours: 0, screentime: 0 }));
 
     thisWeekTasks.forEach(task => {
         const tDate = new Date(task.completedAt!);
@@ -65,8 +66,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, stats, tasks }) => {
             data[diffDays].hours += task.durationHours;
         }
     });
+
+    // Screen Time
+    screentime.forEach(entry => {
+        const tDate = new Date(entry.submittedAt);
+        const diffTime = tDate.getTime() - monday.getTime();
+        const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+        if (diffDays >= 0 && diffDays < 7) {
+            data[diffDays].screentime += entry.hours;
+        }
+    });
+
     return data;
-  }, [thisWeekTasks, monday]);
+  }, [thisWeekTasks, screentime, monday]);
 
   const ratingColor = stats.rating >= 7 ? 'text-green-400' : stats.rating >= 4 ? 'text-yellow-400' : 'text-red-400';
 
@@ -182,9 +194,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, stats, tasks }) => {
                  <Tooltip 
                     contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#f8fafc' }}
                     itemStyle={{ color: '#818cf8' }}
-                    formatter={(value: number) => [`${value.toFixed(1)} hrs`, 'Activity']}
+                    formatter={(value: number, name: string) => [`${value.toFixed(1)} hrs`, name === 'hours' ? 'Productivity' : 'Screen Time']}
                  />
-                 <Area type="monotone" dataKey="hours" stroke="#6366f1" strokeWidth={3} fillOpacity={1} fill="url(#colorHours)" />
+                 <Area type="monotone" dataKey="hours" name="Productivity" stroke="#6366f1" strokeWidth={3} fillOpacity={1} fill="url(#colorHours)" />
+                 <Area type="monotone" dataKey="screentime" name="Screen Time" stroke="#f43f5e" strokeWidth={2} fillOpacity={0.1} fill="#f43f5e" />
                </AreaChart>
              </ResponsiveContainer>
            </div>
