@@ -226,19 +226,17 @@ const App: React.FC = () => {
     });
   };
 
-  if (!isAuthenticated || !user) {
-    return <Auth />;
+  if (status === "loading" || (isLoading && !user)) {
+    return <div className="min-h-screen bg-[#020617] flex items-center justify-center text-white">
+        <div className="flex flex-col items-center gap-4">
+            <Icons.Loader className="w-8 h-8 text-indigo-500 animate-spin" />
+            <p className="text-slate-400 font-medium">Initializing...</p>
+        </div>
+    </div>;
   }
 
-  if (isLoading || !stats) {
-    if (!fetchError) {
-      return <div className="min-h-screen bg-[#020617] flex items-center justify-center text-white">
-          <div className="flex flex-col items-center gap-4">
-              <Icons.Loader className="w-8 h-8 text-indigo-500 animate-spin" />
-              <p className="text-slate-400 font-medium">Syncing data...</p>
-          </div>
-      </div>;
-    }
+  if (!isAuthenticated || !user) {
+    return <Auth />;
   }
 
   if (fetchError) {
@@ -279,10 +277,21 @@ const App: React.FC = () => {
       
       <main className="flex-1 md:ml-64 p-4 md:p-8 overflow-y-auto h-screen">
         <div className="max-w-7xl mx-auto h-full">
-          {currentView === 'dashboard' && <Dashboard user={user} stats={stats!} tasks={tasks} screentime={screentime} />}
-          {currentView === 'tasks' && <TaskList tasks={tasks} setTasks={setTasks} user={user} updateCompletedHours={updateCompletedHours} />}
-          {currentView === 'screentime' && <ScreenTimeUpload user={user} onSubmit={handleScreenTimeSubmit} />}
-          {currentView === 'history' && <History history={[...history, { ...stats!, id: 'current' } as HistoryEntry]} tasks={tasks} screentime={screentime} />}
+          {isLoading ? (
+            <div className="h-full flex items-center justify-center">
+              <div className="flex flex-col items-center gap-4">
+                <Icons.Loader className="w-8 h-8 text-indigo-500 animate-spin" />
+                <p className="text-slate-400 font-medium">Syncing data...</p>
+              </div>
+            </div>
+          ) : (
+            <>
+              {currentView === 'dashboard' && stats && <Dashboard user={user} stats={stats} tasks={tasks} screentime={screentime} />}
+              {currentView === 'tasks' && <TaskList tasks={tasks} setTasks={setTasks} user={user} updateCompletedHours={updateCompletedHours} />}
+              {currentView === 'screentime' && <ScreenTimeUpload user={user} onSubmit={handleScreenTimeSubmit} />}
+              {currentView === 'history' && stats && <History history={[...history, { ...stats, id: 'current' } as HistoryEntry]} tasks={tasks} screentime={screentime} />}
+            </>
+          )}
         </div>
       </main>
     </div>
