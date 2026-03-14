@@ -3,6 +3,10 @@ import { Redis } from '@upstash/redis';
 let redisUrl = process.env.UPSTASH_REDIS_URL || process.env.REDIS_URL || process.env.KV_REST_API_URL;
 let redisToken = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.REDIS_TOKEN || process.env.KV_REST_API_TOKEN;
 
+if (redisUrl && redisUrl.includes('default_ro')) {
+  console.error("CRITICAL ERROR: You are using the 'default_ro' (Read-Only) Redis connection string. NextAuth cannot create users. Please use the standard connection string or REST API token.");
+}
+
 // Convert rediss:// or redis:// upstash URLs to REST URLs
 if (redisUrl && (redisUrl.startsWith('redis://') || redisUrl.startsWith('rediss://'))) {
   try {
