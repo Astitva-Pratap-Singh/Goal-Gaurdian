@@ -1,47 +1,26 @@
 import React, { useState } from 'react';
 import { Icons } from './Icons';
 import { UserProfile } from '../types';
-import { uploadFile } from '../services/storage';
 
 interface ScreenTimeUploadProps {
   user: UserProfile;
-  onSubmit: (hours: number, imageUrl: string) => void;
+  onSubmit: (hours: number) => void;
 }
 
 export const ScreenTimeUpload: React.FC<ScreenTimeUploadProps> = ({ user, onSubmit }) => {
   const [hours, setHours] = useState<number>(0);
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
-  const [file, setFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = e.target.files?.[0];
-    if (selectedFile) {
-      setFile(selectedFile);
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setImagePreview(reader.result as string);
-      };
-      reader.readAsDataURL(selectedFile);
-    }
-  };
-
   const handleSubmit = async () => {
-    if (hours >= 0 && file && user && user.googleId) {
+    if (hours >= 0 && user && user.googleId) {
       try {
         setIsUploading(true);
-        // Store Base64 directly in Firestore (no Storage bucket needed)
-        // uploadFile now returns the base64 string directly
-        const url = await uploadFile(file, '');
-        
-        onSubmit(hours, url);
+        onSubmit(hours);
         setHours(0);
-        setImagePreview(null);
-        setFile(null);
         alert("Screen time logged successfully.");
       } catch (error) {
         console.error(error);
-        alert("Failed to process image.");
+        alert("Failed to process screen time.");
       } finally {
         setIsUploading(false);
       }
@@ -57,7 +36,7 @@ export const ScreenTimeUpload: React.FC<ScreenTimeUploadProps> = ({ user, onSubm
           </div>
           <h2 className="text-2xl font-bold text-white">Daily Screen Time</h2>
           <p className="text-slate-400 text-center mt-2">
-            Upload a screenshot of your device's "Screen Time" or "Digital Wellbeing" dashboard.
+            Log your daily screen time hours.
             <br/><span className="text-red-400 text-sm font-medium">Please submit before 11:00 PM</span>
           </p>
         </div>
@@ -77,31 +56,11 @@ export const ScreenTimeUpload: React.FC<ScreenTimeUploadProps> = ({ user, onSubm
             </div>
           </div>
 
-          <div className="border-2 border-dashed border-slate-700 rounded-xl p-6 text-center hover:bg-slate-800/50 transition-colors">
-             {imagePreview ? (
-               <div className="relative">
-                 <img src={imagePreview} alt="Preview" className="max-h-48 mx-auto rounded-lg" />
-                 <button 
-                   onClick={() => { setImagePreview(null); setFile(null); }}
-                   className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600"
-                 >
-                   <Icons.XCircle className="w-4 h-4" />
-                 </button>
-               </div>
-             ) : (
-               <label className="cursor-pointer flex flex-col items-center gap-2">
-                 <Icons.Upload className="w-8 h-8 text-slate-500" />
-                 <span className="text-slate-400">Tap to upload screenshot</span>
-                 <input type="file" className="hidden" accept="image/*" onChange={handleFileChange} />
-               </label>
-             )}
-          </div>
-
           <button 
             onClick={handleSubmit}
-            disabled={!file || hours === 0 || isUploading}
+            disabled={hours === 0 || isUploading}
             className={`w-full py-4 rounded-xl font-bold text-lg transition-all ${
-              file && hours > 0 && !isUploading
+              hours > 0 && !isUploading
               ? 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-900/30' 
               : 'bg-slate-800 text-slate-500 cursor-not-allowed'
             }`}

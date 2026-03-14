@@ -1,10 +1,6 @@
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Icons } from './Icons';
 import { Task, TaskType, VerificationStatus, UserProfile } from '../types';
-import { verifyTaskProof } from '../services/geminiService';
-import { db } from '../services/firebase';
-import { collection, addDoc, updateDoc, deleteDoc, doc, getDoc } from 'firebase/firestore';
-import { optimizeFile, uploadFile } from '../services/storage';
 
 interface TaskListProps {
   tasks: Task[];
@@ -15,7 +11,6 @@ interface TaskListProps {
 
 export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updateCompletedHours }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [verifyingId, setVerifyingId] = useState<string | null>(null);
   
   // New/Edit Task Form State
   const [newTaskTitle, setNewTaskTitle] = useState('');
@@ -23,13 +18,6 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
   const [newTaskType, setNewTaskType] = useState<TaskType>(TaskType.WORK);
   const [newTaskDuration, setNewTaskDuration] = useState<number>(1);
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
-
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [selectedTaskForUpload, setSelectedTaskForUpload] = useState<string | null>(null);
-
-  // Proof Preview State
-  const [previewProof, setPreviewProof] = useState<string | null>(null);
-  const [loadingProofId, setLoadingProofId] = useState<string | null>(null);
 
   // Daily Limit Calculation
   const dailyLimit = user.weeklyGoalHours / 7;
@@ -45,6 +33,7 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
 
   const randomQuote = useMemo(() => {
       return quotes[Math.floor(Math.random() * quotes.length)];
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Only run once on mount
 
   // --- FILTER TASKS FOR "DAILY VIEW" ---
@@ -109,24 +98,26 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
 
     if (editingTaskId) {
         // UPDATE EXISTING TASK
-        setTasks(prev => prev.map(t => t.id === editingTaskId ? {
-            ...t,
+        const updatedTask = tasks.find(t => t.id === editingTaskId);
+        if (!updatedTask) return;
+        
+        const finalTask = {
+            ...updatedTask,
             title: newTaskTitle,
             description: newTaskDesc,
             type: newTaskType,
             durationHours: newTaskDuration
-        } : t));
+        };
 
+        setTasks(prev => prev.map(t => t.id === editingTaskId ? finalTask : t));
         setIsModalOpen(false);
         resetForm();
 
-        const taskRef = doc(db, 'tasks', editingTaskId);
         try {
-          await updateDoc(taskRef, {
-            title: newTaskTitle,
-            description: newTaskDesc,
-            type: newTaskType,
-            durationHours: newTaskDuration
+          await fetch(`/api/users/${user.googleId}/tasks`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(finalTask)
           });
         } catch (error) {
             console.error("Error updating task", error);
@@ -153,18 +144,11 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
 
         // DB Insert
         try {
-          const docRef = await addDoc(collection(db, 'tasks'), {
-            userId: user.googleId,
-            title: newTask.title,
-            description: newTask.description,
-            type: newTask.type,
-            durationHours: newTask.durationHours,
-            status: newTask.status,
-            createdAt: newTask.createdAt
+          await fetch(`/api/users/${user.googleId}/tasks`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newTask)
           });
-
-          // Update with real ID from DB if successful
-          setTasks(prev => prev.map(t => t.id === tempId ? { ...t, id: docRef.id } : t));
         } catch (error: any) {
             console.error("Error creating task", error);
             setTasks(prev => prev.filter(t => t.id !== tempId));
@@ -182,160 +166,57 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
   };
 
   const handleDeleteTask = async (taskId: string) => {
-    if (!window.confirm("Are you sure you want to remove this completed task? This cannot be undone.")) {
+    if (!window.confirm("Are you sure you want to remove this task? This cannot be undone.")) {
       return;
     }
 
     setTasks(prev => prev.filter(t => t.id !== taskId));
     try {
-      await deleteDoc(doc(db, 'tasks', taskId));
+      await fetch(`/api/users/${user.googleId}/tasks/${taskId}`, { method: 'DELETE' });
     } catch (error) {
       console.error("Error deleting task", error);
       alert("Failed to delete task from server.");
     }
   };
 
-  // --- LAZY LOADING PROOF ---
-  const handleViewProof = async (task: Task) => {
-    // If we already have the proof URL, just show it
-    if (task.proofImage) {
-      setPreviewProof(task.proofImage);
-      return;
-    }
-
-    try {
-      setLoadingProofId(task.id);
-      const taskRef = doc(db, 'tasks', task.id);
-      const docSnap = await getDoc(taskRef);
-
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        if (data.proofImage) {
-          // Update local task state to cache the image so we don't fetch again
-          setTasks(prev => prev.map(t => t.id === task.id ? { ...t, proofImage: data.proofImage } : t));
-          setPreviewProof(data.proofImage);
-        } else {
-          alert("No proof image found for this task.");
-        }
-      } else {
-        alert("Task not found.");
-      }
-    } catch (err) {
-      console.error("Error fetching proof:", err);
-      alert("Failed to load proof image.");
-    } finally {
-      setLoadingProofId(null);
-    }
-  };
-
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    const currentTaskId = selectedTaskForUpload; // Capture ID immediately
-
-    if (!file || !currentTaskId) return;
-    
-    // Clear the input so the same file can be selected again if needed
-    if (fileInputRef.current) fileInputRef.current.value = '';
-
-    const taskIndex = tasks.findIndex(t => t.id === currentTaskId);
+  const handleMarkAsDone = async (taskId: string) => {
+    const taskIndex = tasks.findIndex(t => t.id === taskId);
     if (taskIndex === -1) return;
     const taskToVerify = tasks[taskIndex];
 
-    setVerifyingId(currentTaskId);
-    updateTaskStatus(currentTaskId, VerificationStatus.VERIFYING);
+    const updatedTask = {
+      ...taskToVerify,
+      status: VerificationStatus.VERIFIED,
+      completedAt: Date.now(),
+    };
 
+    // Optimistic Update
+    setTasks(prev => prev.map(t => t.id === taskId ? updatedTask : t));
+    updateCompletedHours(taskToVerify.durationHours);
+
+    // DB Update
     try {
-      // 1. Optimize Image FIRST
-      const optimizedFile = await optimizeFile(file);
-      
-      const reader = new FileReader();
-      reader.onloadend = async () => {
-        const base64String = reader.result as string;
-        
-        // 2. Verify with Optimized Image (Gemini needs base64)
-        const result = await verifyTaskProof(taskToVerify, base64String, optimizedFile.type);
-        
-        let newStatus = VerificationStatus.PENDING;
-        let rejectionReason = "";
-        let publicUrl = "";
-        let completedAt: number | null = null;
-
-        if (result.verified) {
-           // 3. Store Base64 directly in Firestore (no Storage bucket needed)
-           try {
-             // uploadFile now returns the base64 string directly
-             publicUrl = await uploadFile(optimizedFile, ''); 
-             newStatus = VerificationStatus.VERIFIED;
-             completedAt = Date.now();
-           } catch (uploadErr) {
-             console.error("Image processing failed", uploadErr);
-             alert("Verification successful but image processing failed. Please try again.");
-             updateTaskStatus(currentTaskId, VerificationStatus.PENDING);
-             setVerifyingId(null);
-             return;
-           }
-        } else {
-           newStatus = VerificationStatus.REJECTED;
-           rejectionReason = result.reason || "Verification failed";
-        }
-        
-        // 4. Update Database
-        const taskRef = doc(db, 'tasks', currentTaskId);
-        await updateDoc(taskRef, {
-          status: newStatus,
-          completedAt: completedAt,
-          proofImage: publicUrl || null,
-          rejectionReason: rejectionReason
-        });
-
-        // 5. Update Local State
-        setTasks(prev => prev.map(t => 
-            t.id === currentTaskId 
-            ? { 
-                ...t, 
-                status: newStatus, 
-                completedAt: completedAt || undefined, 
-                proofImage: publicUrl,
-                rejectionReason: rejectionReason 
-              } 
-            : t
-        ));
-
-        setVerifyingId(null);
-        setSelectedTaskForUpload(null);
-
-        // 6. Trigger Stats Update (No full re-sync)
-        if (result.verified) {
-           updateCompletedHours(taskToVerify.durationHours);
-        } else if (!result.verified) {
-           alert(`Verification Failed: ${rejectionReason}`);
-        }
-      };
-      reader.readAsDataURL(optimizedFile);
-
-    } catch (err) {
-        console.error("File processing error", err);
-        setVerifyingId(null);
-        alert("Error processing file. Please try again.");
+      await fetch(`/api/users/${user.googleId}/tasks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedTask)
+      });
+    } catch (error) {
+      console.error("Error updating task status", error);
+      alert("Failed to update task status on server.");
+      // Revert optimistic update
+      setTasks(prev => prev.map(t => t.id === taskId ? taskToVerify : t));
+      updateCompletedHours(-taskToVerify.durationHours);
     }
-  };
-
-  const updateTaskStatus = (id: string, status: VerificationStatus) => {
-    setTasks(prev => prev.map(t => t.id === id ? { ...t, status } : t));
-  };
-
-  const triggerUpload = (id: string) => {
-    setSelectedTaskForUpload(id);
-    fileInputRef.current?.click();
   };
 
   return (
     <div className="pb-20 md:pb-0 h-full overflow-y-auto">
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h2 className="text-2xl font-bold text-white">Today's Tasks</h2>
+          <h2 className="text-2xl font-bold text-white">Today&apos;s Tasks</h2>
           <p className="text-slate-400 text-sm">
-             Today's Load: <span className={`${todayUsed > dailyLimit ? 'text-red-400' : 'text-indigo-400'}`}>{todayUsed.toFixed(1)}h</span> / {dailyLimit.toFixed(1)}h limit
+             Today&apos;s Load: <span className={`${todayUsed > dailyLimit ? 'text-red-400' : 'text-indigo-400'}`}>{todayUsed.toFixed(1)}h</span> / {dailyLimit.toFixed(1)}h limit
           </p>
         </div>
         <button 
@@ -352,7 +233,7 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
             <div className="flex flex-col items-center justify-center py-20 text-center animate-in fade-in zoom-in-95 duration-500">
                 <randomQuote.icon className={`w-20 h-20 mb-6 ${randomQuote.color} opacity-80`} />
                 <h3 className="text-xl font-medium text-white max-w-lg leading-relaxed">
-                  "{randomQuote.text}"
+                  &quot;{randomQuote.text}&quot;
                 </h3>
                 <p className="text-slate-600 mt-4 text-sm">Start your day by adding a new task.</p>
             </div>
@@ -391,18 +272,6 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
               </div>
               <h3 className="text-lg font-semibold text-slate-100 pr-8">{task.title}</h3>
               <p className="text-slate-400 text-sm mt-1">{task.description}</p>
-              
-              {/* UPDATED: View Proof button logic checks status NOT task.proofImage presence */}
-              {task.status === VerificationStatus.VERIFIED && (
-                  <button 
-                    onClick={() => handleViewProof(task)}
-                    disabled={loadingProofId === task.id}
-                    className="flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 hover:bg-indigo-950/30 px-2 py-1 -ml-2 mt-2 rounded transition-colors disabled:opacity-50 disabled:cursor-wait"
-                  >
-                    {loadingProofId === task.id ? <Icons.Loader className="w-4 h-4 animate-spin" /> : <Icons.Eye className="w-4 h-4" />}
-                    View Proof
-                  </button>
-              )}
             </div>
 
             <div className="w-full md:w-auto flex justify-end mt-4 md:mt-0">
@@ -420,19 +289,21 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
                       <Icons.Trash className="w-5 h-5" />
                     </button>
                  </div>
-               ) : verifyingId === task.id ? (
-                 <div className="flex items-center gap-2 text-indigo-400 px-4 py-2 animate-pulse">
-                    <Icons.Shield className="w-5 h-5 animate-bounce" />
-                    <span>AI Verifying...</span>
-                 </div>
                ) : (
-                 <div className="w-full md:w-auto">
+                 <div className="flex items-center gap-2 w-full md:w-auto">
                     <button 
-                        onClick={() => triggerUpload(task.id)}
-                        className="w-full md:w-auto flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded-lg border border-slate-700 transition-colors"
+                        onClick={() => handleMarkAsDone(task.id)}
+                        className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg border border-indigo-500 transition-colors"
                     >
-                        <Icons.Upload className="w-4 h-4" />
-                        Submit Proof
+                        <Icons.CheckCircle className="w-4 h-4" />
+                        Mark as Done
+                    </button>
+                    <button 
+                      onClick={() => handleDeleteTask(task.id)}
+                      className="p-2 text-slate-500 hover:text-red-400 hover:bg-red-950/30 rounded-lg transition-colors border border-transparent hover:border-red-900/50"
+                      title="Remove Task"
+                    >
+                      <Icons.Trash className="w-5 h-5" />
                     </button>
                  </div>
                )}
@@ -440,54 +311,6 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
           </div>
         ))}
       </div>
-
-      <input 
-        type="file" 
-        ref={fileInputRef} 
-        onChange={handleFileUpload} 
-        accept="image/*,application/pdf"
-        className="hidden" 
-      />
-
-      {/* Proof Preview Modal */}
-      {previewProof && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/90 backdrop-blur-sm" onClick={() => setPreviewProof(null)}>
-              <div className="relative max-w-4xl w-full bg-slate-900 rounded-xl overflow-hidden shadow-2xl flex flex-col border border-slate-700 animate-in fade-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
-                  <div className="flex justify-between items-center p-4 border-b border-slate-800 bg-slate-950/50">
-                      <h3 className="text-white font-medium flex items-center gap-2">
-                          <Icons.Shield className="w-4 h-4 text-indigo-400" />
-                          Verified Proof
-                      </h3>
-                      <button onClick={() => setPreviewProof(null)} className="text-slate-400 hover:text-white transition-colors">
-                          <Icons.XCircle className="w-6 h-6" />
-                      </button>
-                  </div>
-                  <div className="flex-1 bg-black/50 flex items-center justify-center p-1 min-h-[50vh] max-h-[80vh] overflow-auto">
-                      {previewProof.includes('application/pdf') ? (
-                          <object data={previewProof} type="application/pdf" className="w-full h-[70vh] rounded bg-white">
-                              <div className="flex flex-col items-center justify-center h-full text-slate-400 gap-2">
-                                  <p>PDF preview not available.</p>
-                                  <a href={previewProof} download="proof.pdf" className="text-indigo-400 hover:underline">Download PDF</a>
-                              </div>
-                          </object>
-                      ) : (
-                          <img src={previewProof} alt="Proof" className="max-w-full max-h-[75vh] object-contain rounded shadow-lg" />
-                      )}
-                  </div>
-                   <div className="p-4 border-t border-slate-800 flex justify-between items-center bg-slate-900">
-                      <span className="text-xs text-slate-500">Verified by Goal Guardian AI</span>
-                      <a 
-                          href={previewProof} 
-                          download={`proof_${Date.now()}.${previewProof.includes('application/pdf') ? 'pdf' : 'png'}`} 
-                          className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-sm font-medium transition-colors"
-                      >
-                          <Icons.Upload className="w-4 h-4 rotate-180" />
-                          Download File
-                      </a>
-                  </div>
-              </div>
-          </div>
-      )}
 
       {/* Create/Edit Task Modal */}
       {isModalOpen && (
@@ -508,12 +331,12 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
               </div>
 
               <div>
-                <label className="block text-sm text-slate-400 mb-1">Description (for AI Verification)</label>
+                <label className="block text-sm text-slate-400 mb-1">Description</label>
                 <textarea 
                   value={newTaskDesc}
                   onChange={(e) => setNewTaskDesc(e.target.value)}
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500 h-24 resize-none"
-                  placeholder="Describe exactly what will be visible in the proof..."
+                  placeholder="Describe your task..."
                 />
               </div>
 

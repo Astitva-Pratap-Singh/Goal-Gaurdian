@@ -19,7 +19,6 @@ export interface Task {
   createdAt: number;
   completedAt?: number;
   status: VerificationStatus;
-  proofImage?: string; // Base64
   rejectionReason?: string;
 }
 

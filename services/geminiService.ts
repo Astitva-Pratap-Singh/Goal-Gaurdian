@@ -1,112 +1,41 @@
 import { GoogleGenAI } from "@google/genai";
-import { Task } from "../types";
 
-// Vite requires static access to import.meta.env for production builds
-const getEnv = (key: string) => {
-  // @ts-ignore
-  if (typeof import.meta !== 'undefined' && import.meta.env) {
-    if (key === 'API_KEY') return import.meta.env.VITE_API_KEY || import.meta.env.API_KEY;
-  }
-  // @ts-ignore
-  if (typeof process !== 'undefined' && process.env) {
-    if (key === 'API_KEY') return process.env.REACT_APP_API_KEY || process.env.API_KEY;
-  }
-  return "";
-};
-
-const API_KEY = getEnv("API_KEY");
-
-const getClient = () => new GoogleGenAI({ apiKey: API_KEY });
-
-export const verifyTaskProof = async (
-  task: Task,
-  imageBase64: string,
-  mimeType: string = "image/jpeg"
-): Promise<{ verified: boolean; reason?: string }> => {
-  try {
-    if (!API_KEY) {
-      return { verified: false, reason: "API Key is missing in environment variables." };
-    }
-
-    const ai = getClient();
-    
-    // Clean base64 string if it contains data URI prefix
-    const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, "");
-
-    const prompt = `
-      You are a strict productivity verifier. 
-      The user claims to have completed the following task: "${task.title}".
-      Description: "${task.description}".
-      Expected Duration: ${task.durationHours} hours.
-      
-      Analyze the provided image evidence. Does the image reasonably prove that this specific task was worked on or completed?
-      
-      Rules:
-      1. If the image is unrelated, blurry, or clearly fake, reject it.
-      2. If the image shows work related to the task title, accept it.
-      3. Reply with a strict JSON object: { "verified": boolean, "reason": "short explanation" }.
-    `;
-
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: {
-        parts: [
-          {
-            inlineData: {
-              mimeType: mimeType,
-              data: cleanBase64,
-            },
-          },
-          {
-            text: prompt,
-          },
-        ],
-      },
-      config: {
-        responseMimeType: "application/json",
-      }
-    });
-
-    const text = response.text || "{}";
-    const result = JSON.parse(text);
-
-    return {
-      verified: result.verified === true,
-      reason: result.reason || "AI could not determine verification status.",
-    };
-
-  } catch (error) {
-    console.error("Gemini Verification Error:", error);
-    return {
-      verified: false,
-      reason: "AI verification service failed. Please try again.",
-    };
-  }
-};
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || 'mock-key' });
 
 export const calculateWeeklyRating = async (
   completedHours: number,
   goalHours: number,
   screenTimeHours: number
 ): Promise<number> => {
-    if (goalHours === 0) return 0;
-
-    // 1. Productivity Score (Base 0-10)
-    const productivityScore = (completedHours / goalHours) * 10;
-    
-    // 2. Screen Time Penalty
-    // Threshold: 21 hours/week (3 hours/day) is "acceptable".
-    const screenTimeThreshold = 21;
-    let penalty = 0;
-    
-    if (screenTimeHours > screenTimeThreshold) {
-        // Penalty: Lose 0.15 points per hour over the limit
-        // Example: 60 hours total -> 39 hours over -> 5.85 point penalty.
-        penalty = (screenTimeHours - screenTimeThreshold) * 0.15;
+  try {
+    if (!process.env.GEMINI_API_KEY) {
+      // Fallback calculation if no API key
+      let rating = (completedHours / goalHours) * 10;
+      rating -= (screenTimeHours / 10); // Penalty for screen time
+      return Math.max(0, Math.min(10, Number(rating.toFixed(1))));
     }
 
-    let finalRating = productivityScore - penalty;
-    finalRating = Math.max(0, Math.min(10, finalRating)); // Clamp between 0 and 10
+    const prompt = `
+      As an AI productivity coach, rate this week's performance on a scale of 0.0 to 10.0.
+      - Goal Hours: ${goalHours}
+      - Completed Hours: ${completedHours}
+      - Screen Time Hours: ${screenTimeHours}
+      
+      Return ONLY the numerical rating (e.g., 8.5).
+    `;
 
-    return parseFloat(finalRating.toFixed(1));
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: prompt,
+    });
+
+    const rating = parseFloat(response.text?.trim() || "0");
+    return isNaN(rating) ? 0 : Math.max(0, Math.min(10, rating));
+  } catch (error) {
+    console.error("Error calculating rating:", error);
+    // Fallback calculation
+    let rating = (completedHours / goalHours) * 10;
+    rating -= (screenTimeHours / 10);
+    return Math.max(0, Math.min(10, Number(rating.toFixed(1))));
+  }
 };
