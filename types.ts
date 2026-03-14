@@ -20,13 +20,11 @@ export interface Task {
   completedAt?: number;
   status: VerificationStatus;
   rejectionReason?: string;
-  proofImage?: string; // Base64 proof image
 }
 
 export interface ScreenTimeEntry {
   date: string; // ISO Date YYYY-MM-DD
   hours: number;
-  proofImage?: string;
   submittedAt: number;
 }
 

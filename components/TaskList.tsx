@@ -140,8 +140,7 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
         ...task,
         status: finalStatus,
         completedAt: result.verified ? Date.now() : undefined,
-        rejectionReason: result.verified ? undefined : result.reason,
-        proofImage: base64Image
+        rejectionReason: result.verified ? undefined : result.reason
       };
       
       setTasks(prev => prev.map(t => t.id === task.id ? updatedTask : t));

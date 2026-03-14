@@ -192,7 +192,7 @@ const App: React.FC = () => {
     });
   };
 
-  const handleScreenTimeSubmit = async (hours: number, proofImage?: string) => {
+  const handleScreenTimeSubmit = async (hours: number) => {
      if (!user || !stats) return;
 
      const newScreenTime = stats.screenTimeHours + hours;
@@ -216,7 +216,6 @@ const App: React.FC = () => {
     const entry = {
       date: new Date().toISOString().split('T')[0],
       hours,
-      proofImage,
       submittedAt: Date.now()
     };
 
