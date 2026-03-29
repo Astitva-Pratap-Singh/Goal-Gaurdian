@@ -24,6 +24,8 @@ interface HistoryProps {
   history: HistoryEntry[];
   tasks: Task[];
   screentime: ScreenTimeEntry[];
+  userId?: string;
+  onDeleteHistory?: (weekId: string) => void;
 }
 
 // Helper to calculate ISO Week ID (Matches App.tsx logic)
@@ -39,7 +41,7 @@ const getWeekIdFromTimestamp = (timestamp: number) => {
   return `${d.getFullYear()}-W${String(weekNo).padStart(2, '0')}`;
 };
 
-export const History: React.FC<HistoryProps> = ({ history, tasks, screentime }) => {
+export const History: React.FC<HistoryProps> = ({ history, tasks, screentime, userId, onDeleteHistory }) => {
   const [expandedWeekId, setExpandedWeekId] = useState<string | null>(null);
 
   // 1. Sort history chronologically (Oldest -> Newest) using robust numeric parsing
@@ -164,9 +166,22 @@ export const History: React.FC<HistoryProps> = ({ history, tasks, screentime }) 
 
   return (
     <div className="space-y-8 pb-20 md:pb-0">
-       <header className="mb-6">
-          <h2 className="text-3xl font-bold text-white mb-1">Performance History</h2>
-          <p className="text-slate-400">Track your productivity trends and screen time over weeks.</p>
+       <header className="mb-6 flex justify-between items-start">
+          <div>
+            <h2 className="text-3xl font-bold text-white mb-1">Performance History</h2>
+            <p className="text-slate-400">Track your productivity trends and screen time over weeks.</p>
+          </div>
+          {userId && (
+            <button 
+              onClick={() => {
+                window.open(`/api/users/${userId}/weekly-stats`, '_blank');
+              }}
+              className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg transition-colors text-sm font-medium border border-slate-700"
+            >
+              <Icons.Download className="w-4 h-4" />
+              Export JSON
+            </button>
+          )}
        </header>
 
        {/* Summary Cards */}
@@ -253,6 +268,7 @@ export const History: React.FC<HistoryProps> = ({ history, tasks, screentime }) 
                       <Tooltip 
                          cursor={{fill: '#1e293b'}} 
                          contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc' }}
+                         formatter={(value: number, name: string) => [`${value.toFixed(1)} hrs`, name]}
                       />
                       <Legend />
                       <Bar dataKey="completedHours" name="Completed" fill="#6366f1" radius={[4, 4, 0, 0]} barSize={20} />
@@ -274,6 +290,7 @@ export const History: React.FC<HistoryProps> = ({ history, tasks, screentime }) 
                       <YAxis stroke="#475569" fontSize={12} tickLine={false} axisLine={false} />
                       <Tooltip 
                          contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc' }}
+                         formatter={(value: number, name: string) => [`${value.toFixed(1)} hrs`, name]}
                       />
                       <Legend />
                       <ReferenceLine y={21} stroke="#ef4444" strokeDasharray="3 3" label={{ value: 'Limit', position: 'insideTopRight', fill: '#ef4444', fontSize: 10 }} />
@@ -354,7 +371,7 @@ export const History: React.FC<HistoryProps> = ({ history, tasks, screentime }) 
                                                         <Tooltip 
                                                             cursor={{stroke: '#334155'}} 
                                                             contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc' }}
-                                                            formatter={(value: number) => [`${value.toFixed(1)} hrs`]}
+                                                            formatter={(value: number, name: string) => [`${value.toFixed(1)} hrs`, name]}
                                                         />
                                                         <Legend />
                                                         <Line 

@@ -19,7 +19,8 @@ import {
   Eye,
   Loader2,
   User,
-  Database
+  Database,
+  Download
 } from 'lucide-react';
 
 export const Icons = {
@@ -42,5 +43,6 @@ export const Icons = {
   Eye,
   Loader: Loader2,
   User,
-  Database
+  Database,
+  Download
 };

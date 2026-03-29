@@ -308,7 +308,7 @@ const App: React.FC = () => {
               {currentView === 'dashboard' && stats && <Dashboard user={user} stats={stats} tasks={tasks} screentime={screentime} />}
               {currentView === 'tasks' && <TaskList tasks={tasks} setTasks={setTasks} user={user} updateCompletedHours={updateCompletedHours} />}
               {currentView === 'screentime' && <ScreenTimeUpload user={user} onSubmit={handleScreenTimeSubmit} />}
-              {currentView === 'history' && stats && <History history={[...history, { ...stats, id: 'current' } as HistoryEntry]} tasks={tasks} screentime={screentime} onDeleteHistory={handleDeleteHistory} />}
+              {currentView === 'history' && stats && <History history={[...history, { ...stats, id: 'current' } as HistoryEntry]} tasks={tasks} screentime={screentime} onDeleteHistory={handleDeleteHistory} userId={user?.googleId} />}
             </>
           )}
         </div>

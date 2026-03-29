@@ -193,7 +193,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, stats, tasks, screen
                  <YAxis stroke="#475569" fontSize={12} tickLine={false} axisLine={false} />
                  <Tooltip 
                     contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#f8fafc' }}
-                    itemStyle={{ color: '#818cf8' }}
                     formatter={(value: number, name: string) => [`${value.toFixed(1)} hrs`, name]}
                  />
                  <Area type="monotone" dataKey="hours" name="Productivity" stroke="#6366f1" strokeWidth={3} fillOpacity={1} fill="url(#colorHours)" />
