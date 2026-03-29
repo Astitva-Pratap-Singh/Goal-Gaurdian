@@ -22,3 +22,20 @@ export async function GET(request: Request, { params }: { params: { userId: stri
     return NextResponse.json({ error: "Failed to fetch stats" }, { status: 500 });
   }
 }
+
+export async function DELETE(request: Request, { params }: { params: { userId: string } }) {
+  const { userId } = params;
+  const { searchParams } = new URL(request.url);
+  const weekId = searchParams.get('weekId');
+  
+  if (!weekId) {
+    return NextResponse.json({ error: "Week ID is required" }, { status: 400 });
+  }
+
+  try {
+    await redis.hdel(`user:${userId}:stats`, weekId);
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    return NextResponse.json({ error: "Failed to delete stats" }, { status: 500 });
+  }
+}

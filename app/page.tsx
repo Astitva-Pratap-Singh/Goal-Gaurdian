@@ -145,6 +145,25 @@ const App: React.FC = () => {
     }
   };
 
+  const handleDeleteHistory = async (weekId: string) => {
+    if (!user) return;
+    if (!window.confirm(`Are you sure you want to delete the history for week ${weekId}? This cannot be undone.`)) return;
+
+    try {
+      const res = await fetch(`/api/users/${user.googleId}/stats?weekId=${weekId}`, {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        setHistory(prev => prev.filter(h => h.weekId !== weekId));
+      } else {
+        alert("Failed to delete history entry.");
+      }
+    } catch (error) {
+      console.error("Error deleting history:", error);
+      alert("An error occurred while deleting history.");
+    }
+  };
+
   const handleLogout = () => {
     signOut();
   };
@@ -289,7 +308,7 @@ const App: React.FC = () => {
               {currentView === 'dashboard' && stats && <Dashboard user={user} stats={stats} tasks={tasks} screentime={screentime} />}
               {currentView === 'tasks' && <TaskList tasks={tasks} setTasks={setTasks} user={user} updateCompletedHours={updateCompletedHours} />}
               {currentView === 'screentime' && <ScreenTimeUpload user={user} onSubmit={handleScreenTimeSubmit} />}
-              {currentView === 'history' && stats && <History history={[...history, { ...stats, id: 'current' } as HistoryEntry]} tasks={tasks} screentime={screentime} />}
+              {currentView === 'history' && stats && <History history={[...history, { ...stats, id: 'current' } as HistoryEntry]} tasks={tasks} screentime={screentime} onDeleteHistory={handleDeleteHistory} />}
             </>
           )}
         </div>

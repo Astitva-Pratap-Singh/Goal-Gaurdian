@@ -194,7 +194,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, stats, tasks, screen
                  <Tooltip 
                     contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#f8fafc' }}
                     itemStyle={{ color: '#818cf8' }}
-                    formatter={(value: number, name: string) => [`${value.toFixed(1)} hrs`, name === 'hours' ? 'Productivity' : 'Screen Time']}
+                    formatter={(value: number, name: string) => [`${value.toFixed(1)} hrs`, name]}
                  />
                  <Area type="monotone" dataKey="hours" name="Productivity" stroke="#6366f1" strokeWidth={3} fillOpacity={1} fill="url(#colorHours)" />
                  <Area type="monotone" dataKey="screentime" name="Screen Time" stroke="#f43f5e" strokeWidth={2} fillOpacity={0.1} fill="#f43f5e" />
@@ -221,7 +221,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, stats, tasks, screen
                   <Tooltip 
                     cursor={{fill: '#1e293b'}} 
                     contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc' }} 
-                    formatter={(value: number, name: string) => [`${value.toFixed(1)} hrs`, name === 'study' ? 'Study' : name === 'work' ? 'Work' : 'Screen Time']}
+                    formatter={(value: number, name: string) => [`${value.toFixed(1)} hrs`, name]}
                   />
                   <Legend />
                   <Bar dataKey="study" name="Study" stackId="a" fill="#818cf8" radius={[0, 0, 0, 0]} barSize={40} />
