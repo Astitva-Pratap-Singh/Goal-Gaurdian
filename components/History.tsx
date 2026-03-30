@@ -166,22 +166,9 @@ export const History: React.FC<HistoryProps> = ({ history, tasks, screentime, us
 
   return (
     <div className="space-y-8 pb-20 md:pb-0">
-       <header className="mb-6 flex justify-between items-start">
-          <div>
-            <h2 className="text-3xl font-bold text-white mb-1">Performance History</h2>
-            <p className="text-slate-400">Track your productivity trends and screen time over weeks.</p>
-          </div>
-          {userId && (
-            <button 
-              onClick={() => {
-                window.open(`/api/users/${userId}/weekly-stats`, '_blank');
-              }}
-              className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg transition-colors text-sm font-medium border border-slate-700"
-            >
-              <Icons.Download className="w-4 h-4" />
-              Export JSON
-            </button>
-          )}
+       <header className="mb-6">
+          <h2 className="text-3xl font-bold text-white mb-1">Performance History</h2>
+          <p className="text-slate-400">Track your productivity trends and screen time over weeks.</p>
        </header>
 
        {/* Summary Cards */}

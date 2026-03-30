@@ -38,17 +38,31 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Only run once on mount
 
-  // --- FILTER TASKS FOR "DAILY VIEW" ---
+  // --- FILTER TASKS FOR "RECENT VIEW" (Last 7 Days) ---
   const visibleTasks = useMemo(() => {
+    const now = new Date();
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    sevenDaysAgo.setHours(0, 0, 0, 0);
+
+    return tasks.filter(t => {
+        const createdAt = new Date(t.createdAt);
+        const completedAt = t.completedAt ? new Date(t.completedAt) : null;
+        
+        // Task is visible if it was created within the last 7 days
+        // OR if it was completed within the last 7 days
+        return createdAt >= sevenDaysAgo || (completedAt && completedAt >= sevenDaysAgo);
+    });
+  }, [tasks]);
+  
+  const todayTasks = useMemo(() => {
     const todayStr = new Date().toDateString();
     return tasks.filter(t => {
         const createdToday = new Date(t.createdAt).toDateString() === todayStr;
         const completedToday = t.completedAt ? new Date(t.completedAt).toDateString() === todayStr : false;
-        return createdToday || completedToday;
+        return (createdToday || completedToday) && t.status !== VerificationStatus.REJECTED;
     });
   }, [tasks]);
-  
-  const todayTasks = visibleTasks.filter(t => t.status !== VerificationStatus.REJECTED);
+
   const todayUsed = todayTasks.reduce((acc, t) => acc + t.durationHours, 0);
 
   const formatTimeAgo = (timestamp: number | string) => {
@@ -56,11 +70,15 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
     const date = new Date(timestamp);
     const now = new Date();
     const seconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+    
     if (seconds < 60) return 'just now';
+    
     const intervals = [
+        { label: 'd', seconds: 86400 },
         { label: 'hr', seconds: 3600 },
         { label: 'min', seconds: 60 }
     ];
+    
     for (const i of intervals) {
         const count = Math.floor(seconds / i.seconds);
         if (count >= 1) return `${count}${i.label} ago`;
@@ -221,7 +239,7 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
     <div className="pb-20 md:pb-0 h-full overflow-y-auto">
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h2 className="text-2xl font-bold text-white">Today&apos;s Tasks</h2>
+          <h2 className="text-2xl font-bold text-white">Recent Tasks</h2>
           <p className="text-slate-400 text-sm">
              Today&apos;s Load: <span className={`${todayUsed > dailyLimit ? 'text-red-400' : 'text-indigo-400'}`}>{todayUsed.toFixed(1)}h</span> / {dailyLimit.toFixed(1)}h limit
           </p>

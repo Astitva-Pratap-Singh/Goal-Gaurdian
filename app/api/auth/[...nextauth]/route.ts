@@ -1,9 +1,9 @@
-import NextAuth from "next-auth"
+import NextAuth, { NextAuthOptions } from "next-auth"
 import GoogleProvider from "next-auth/providers/google"
 import { UpstashRedisAdapter } from "@next-auth/upstash-redis-adapter"
 import redis from "@/lib/redis"
 
-const handler = NextAuth({
+export const authOptions: NextAuthOptions = {
   adapter: UpstashRedisAdapter(redis),
   providers: [
     GoogleProvider({
@@ -78,6 +78,8 @@ const handler = NextAuth({
   },
   debug: process.env.NODE_ENV === 'development',
   secret: process.env.NEXTAUTH_SECRET || "fallback_secret_for_development",
-})
+}
+
+const handler = NextAuth(authOptions)
 
 export { handler as GET, handler as POST }
