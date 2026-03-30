@@ -20,6 +20,7 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
   const [newTaskDuration, setNewTaskDuration] = useState<number>(1);
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
+  const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
 
   // Daily Limit Calculation
   const dailyLimit = user.weeklyGoalHours / 7;
@@ -170,6 +171,58 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
     setEditingTaskId(null);
   };
 
+  const toggleTaskSelection = (taskId: string) => {
+    setSelectedTaskIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(taskId)) {
+        newSet.delete(taskId);
+      } else {
+        newSet.add(taskId);
+      }
+      return newSet;
+    });
+  };
+
+  const handleSelectAll = () => {
+    if (selectedTaskIds.size === visibleTasks.length) {
+      setSelectedTaskIds(new Set());
+    } else {
+      setSelectedTaskIds(new Set(visibleTasks.map(t => t.id)));
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedTaskIds.size === 0) return;
+    if (!window.confirm(`Remove ${selectedTaskIds.size} selected task(s)?`)) return;
+
+    let hoursToDeduct = 0;
+    const tasksToDelete = tasks.filter(t => selectedTaskIds.has(t.id));
+    
+    tasksToDelete.forEach(t => {
+      if (t.status === VerificationStatus.VERIFIED) {
+        hoursToDeduct += t.durationHours;
+      }
+    });
+
+    if (hoursToDeduct > 0) {
+      updateCompletedHours(-hoursToDeduct);
+    }
+
+    setTasks(prev => prev.filter(t => !selectedTaskIds.has(t.id)));
+    
+    try {
+      await Promise.all(
+        Array.from(selectedTaskIds).map(taskId => 
+          fetch(`/api/users/${user.googleId}/tasks/${taskId}`, { method: 'DELETE' })
+        )
+      );
+    } catch (error) {
+      console.error("Error deleting tasks", error);
+    }
+
+    setSelectedTaskIds(new Set());
+  };
+
   const handleDeleteTask = async (taskId: string) => {
     const taskToDelete = tasks.find(t => t.id === taskId);
     if (!taskToDelete) return;
@@ -236,7 +289,7 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
   };
 
   return (
-    <div className="pb-20 md:pb-0 h-full overflow-y-auto">
+    <div className="pb-20 md:pb-0 h-full overflow-y-auto custom-scrollbar pr-2">
       <div className="flex justify-between items-center mb-6">
         <div>
           <h2 className="text-2xl font-bold text-white">Recent Tasks</h2>
@@ -244,13 +297,32 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
              Today&apos;s Load: <span className={`${todayUsed > dailyLimit ? 'text-red-400' : 'text-indigo-400'}`}>{todayUsed.toFixed(1)}h</span> / {dailyLimit.toFixed(1)}h limit
           </p>
         </div>
-        <button 
-          onClick={openCreateModal}
-          className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors font-medium shadow-lg shadow-indigo-900/20"
-        >
-          <Icons.Plus className="w-5 h-5" />
-          Add Task
-        </button>
+        <div className="flex items-center gap-3">
+          {visibleTasks.length > 0 && (
+            <button 
+              onClick={handleSelectAll}
+              className="text-slate-400 hover:text-slate-200 text-sm font-medium transition-colors px-2"
+            >
+              {selectedTaskIds.size === visibleTasks.length ? 'Deselect All' : 'Select All'}
+            </button>
+          )}
+          {selectedTaskIds.size > 0 && (
+            <button 
+              onClick={handleBulkDelete}
+              className="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 px-4 py-2 rounded-lg flex items-center gap-2 transition-colors font-medium"
+            >
+              <Icons.Trash className="w-4 h-4" />
+              Delete ({selectedTaskIds.size})
+            </button>
+          )}
+          <button 
+            onClick={openCreateModal}
+            className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors font-medium shadow-lg shadow-indigo-900/20"
+          >
+            <Icons.Plus className="w-5 h-5" />
+            Add Task
+          </button>
+        </div>
       </div>
 
       <div className="space-y-4">
@@ -264,8 +336,17 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
         )}
 
         {visibleTasks.map(task => (
-          <div key={task.id} className={`bg-slate-900 border ${task.status === VerificationStatus.VERIFIED ? 'border-green-900/30 bg-green-900/5' : task.status === VerificationStatus.REJECTED ? 'border-red-900/30' : 'border-slate-800'} rounded-2xl p-5 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 transition-all hover:border-slate-700 group relative`}>
+          <div key={task.id} className={`bg-slate-900 border ${selectedTaskIds.has(task.id) ? 'border-indigo-500/50 bg-indigo-900/10' : task.status === VerificationStatus.VERIFIED ? 'border-green-900/30 bg-green-900/5' : task.status === VerificationStatus.REJECTED ? 'border-red-900/30' : 'border-slate-800'} rounded-2xl p-5 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 transition-all hover:border-slate-700 group relative`}>
             
+            <div className="absolute top-5 left-5">
+              <input 
+                type="checkbox" 
+                checked={selectedTaskIds.has(task.id)}
+                onChange={() => toggleTaskSelection(task.id)}
+                className="w-4 h-4 rounded border-slate-700 bg-slate-800 text-indigo-600 focus:ring-indigo-500 focus:ring-offset-slate-900 cursor-pointer"
+              />
+            </div>
+
             {task.status !== VerificationStatus.VERIFIED && task.status !== VerificationStatus.VERIFYING && (
                 <button 
                     onClick={() => openEditModal(task)}
@@ -276,7 +357,7 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
                 </button>
             )}
 
-            <div className="flex-1">
+            <div className="flex-1 pl-8">
               <div className="flex items-center gap-3 mb-2">
                 <span className={`text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded ${task.type === TaskType.STUDY ? 'bg-indigo-950 text-indigo-400' : 'bg-teal-950 text-teal-400'}`}>
                   {task.type === TaskType.STUDY ? 'Study' : 'Work'}
