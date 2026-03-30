@@ -27,9 +27,15 @@ body {
 }
 
 /* Custom Scrollbar for Task List and other scrollable areas */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #334155 transparent;
+  scroll-behavior: smooth;
+}
+
 .custom-scrollbar::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-track {
@@ -37,10 +43,12 @@ body {
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: #334155; /* slate-700 */
-  border-radius: 10px;
+  background-color: #334155; /* slate-700 */
+  border-radius: 20px;
+  border: 2px solid transparent;
+  background-clip: content-box;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: #475569; /* slate-600 */
+  background-color: #475569; /* slate-600 */
 }

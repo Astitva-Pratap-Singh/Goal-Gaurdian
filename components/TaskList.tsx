@@ -339,12 +339,19 @@ export const TaskList: React.FC<TaskListProps> = ({ tasks, user, setTasks, updat
           <div key={task.id} className={`bg-slate-900 border ${selectedTaskIds.has(task.id) ? 'border-indigo-500/50 bg-indigo-900/10' : task.status === VerificationStatus.VERIFIED ? 'border-green-900/30 bg-green-900/5' : task.status === VerificationStatus.REJECTED ? 'border-red-900/30' : 'border-slate-800'} rounded-2xl p-5 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 transition-all hover:border-slate-700 group relative`}>
             
             <div className="absolute top-5 left-5">
-              <input 
-                type="checkbox" 
-                checked={selectedTaskIds.has(task.id)}
-                onChange={() => toggleTaskSelection(task.id)}
-                className="w-4 h-4 rounded border-slate-700 bg-slate-800 text-indigo-600 focus:ring-indigo-500 focus:ring-offset-slate-900 cursor-pointer"
-              />
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleTaskSelection(task.id);
+                }}
+                className={`w-5 h-5 rounded flex items-center justify-center border transition-all duration-200 ${
+                  selectedTaskIds.has(task.id)
+                    ? 'bg-indigo-600 border-indigo-600 text-white shadow-[0_0_10px_rgba(79,70,229,0.3)]'
+                    : 'bg-slate-800/50 border-slate-600 hover:border-indigo-500 hover:bg-slate-800'
+                }`}
+              >
+                {selectedTaskIds.has(task.id) && <Icons.Check className="w-3.5 h-3.5" />}
+              </button>
             </div>
 
             {task.status !== VerificationStatus.VERIFIED && task.status !== VerificationStatus.VERIFYING && (
